@@ -3,7 +3,9 @@ import time
 import random
 import math
 import matplotlib.pyplot as plt
+import pandas as pd
 
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 # Initialize Pygame
 pygame.init()
@@ -43,34 +45,10 @@ class DataCollection:
         self.lat_distance.append(lat_distance)
         self.lon_relative_velocity.append(lon_relative_velocity)
 
-class Plotter3D:
-    def __init__(self,car_name):
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(111, projection='3d')
-        # self.ax = self.fig.gca(projection='3d')
-        # self.ax = self.fig.add_subplot(111)
-        self.data = []
-        self.car_name = car_name
-        self.previous_time = time.time()
-
-    def add_data(self, lon_distance, lat_distance, lon_relative_speed):
-        self.data.append((lon_distance, lat_distance, lon_relative_speed))
-
-    def update_plot(self):
-        if self.data and (time.time()-self.previous_time >= 0.1):
-            # self.ax.clear()
-            lon, lat, speed = zip(*self.data)
-            # self.ax.plot_surface(lon, lat, speed, cmap='summer', rstride=1, cstride=1, alpha=None)
-            self.ax.scatter(lon, lat, speed, c='r', marker='o')
-            # self.ax.scatter(lon, speed, c='r', marker='o')
-            self.ax.set_title(f"3D plot of {self.car_name} compared to ego vehicle")
-            self.ax.set_xlabel("Longitudinal Distance (pixels)")
-            self.ax.set_ylabel("Lateral Distance (pixels)")
-            self.ax.set_zlabel("Longitudinal Relative Velocity (pixels/s)")
-            # self.ax.set_ylabel("Longitudinal Relative Velocity (pixels/s)")
-            self.previous_time = time.time()
-            plt.pause(0.000000000000000000000000000000001)  # Pause to update the plot
-
+    def update_DataFrame(self):
+        dict = {'longitudinal_distance': self.lon_distance, 'lateral_distance': self.lat_distance, 'longitudinal_relative_velocity': self.lon_relative_velocity} 
+        df = pd.DataFrame(dict)
+        return df
 
 class Vehicle:
     def __init__(self, x, y, speed, color):
@@ -170,16 +148,23 @@ class Simulation:
         pygame.display.set_caption("Lane Changing Simulation")
         self.clock = pygame.time.Clock()
         self.vehicles = self.initialize_vehicles(randomize=False)
-        self.plotters = self.initialize_plotters()
+        self.fig, self.axes = plt.subplots(1,2,figsize=(8, 3))  # Create a Matplotlib figure
 
-    def initialize_plotters(self):
-        plotters = []
-        # add plotters for all vehicles except ego vehicle
-        for i,vehicle in enumerate(self.vehicles[1:],start=1):
-            plotter = Plotter3D(f'Car {i}')
-            plotters.append(plotter)
-        return plotters
 
+    def update_plot_on_screen(self):
+        for i, vehicle in enumerate(self.vehicles[1:]):
+            lon = vehicle.data_collections.lon_distance
+            lat = vehicle.data_collections.lat_distance
+            speed = vehicle.data_collections.lon_relative_velocity
+            self.axes[i].clear()
+            self.axes[i].plot(lon, speed, label=f"Car {i+1}")
+            self.axes[i].set_title(f"State-space graph of Car {i+1}")
+            self.axes[i].set_xlabel("Longitudinal Distance (pixels)")
+            self.axes[i].set_ylabel("Longitudinal Relative Velocity (pixels/s)")
+            self.axes[i].set_xlim((-50,50))
+            self.axes[i].set_ylim((-20,20))
+            self.axes[i].legend()
+            self.axes[i].grid()
 
     def initialize_vehicles(self,randomize = True):
         vehicles = []
@@ -283,12 +268,17 @@ class Simulation:
         ego = self.vehicles[0]
 
         for i,vehicle in enumerate(self.vehicles[1:]):
-            distance_x = calculate_x_distance(ego,vehicle)
-            distance_y = calculate_y_distance(ego,vehicle)
-            relative_speed = vehicle.scaled_speed - ego.scaled_speed
+            distance_x = calculate_x_distance(ego,vehicle)/20
+            distance_y = calculate_y_distance(ego,vehicle)/20
+            relative_speed = (vehicle.scaled_speed - ego.scaled_speed)/20
             vehicle.data_collections.update_value(distance_x,distance_y,relative_speed)
-            self.plotters[i].add_data(distance_x, distance_y, relative_speed)
+            # self.plotters[i].add_data(distance_x, distance_y, relative_speed)
             
+    def save_df(self):
+        for i,vehicle in enumerate(self.vehicles[1:]):
+            df = vehicle.data_collections.update_DataFrame()
+            df.to_csv(f'Car_{i+1}_data.csv',index=False)
+
 
     def show_verbose(self):
         ego = self.vehicles[0]
@@ -387,10 +377,7 @@ class Simulation:
             if not paused:  # Only update and draw when not paused
                 self.update()
                 self.draw()
-                if plot:
-                    for plotter in self.plotters:
-                        plotter.update_plot()
-                    
+                self.save_df()
 
             if paused:
                 font = pygame.font.Font(None, 48)
