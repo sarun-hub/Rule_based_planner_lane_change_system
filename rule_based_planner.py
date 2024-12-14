@@ -5,8 +5,6 @@ import math
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-
 # Initialize Pygame
 pygame.init()
 
@@ -39,14 +37,19 @@ class DataCollection:
         self.lon_distance = []
         self.lat_distance = []
         self.lon_relative_velocity = []
+        self.lon_ego_velocity = []
+        self.lon_velocity = []
 
-    def update_value(self,lon_distance,lat_distance,lon_relative_velocity):
+    def update_value(self,lon_distance,lat_distance,lon_relative_velocity,lon_ego_velocity,lon_velocity):
         self.lon_distance.append(lon_distance)
         self.lat_distance.append(lat_distance)
         self.lon_relative_velocity.append(lon_relative_velocity)
+        self.lon_ego_velocity.append(lon_ego_velocity)
+        self.lon_velocity.append(lon_velocity)
 
     def update_DataFrame(self):
-        dict = {'longitudinal_distance': self.lon_distance, 'lateral_distance': self.lat_distance, 'longitudinal_relative_velocity': self.lon_relative_velocity} 
+        dict = {'longitudinal_distance': self.lon_distance, 'lateral_distance': self.lat_distance, 'longitudinal_relative_velocity': self.lon_relative_velocity,
+                'longitudinal_ego_velocity': self.lon_ego_velocity,'longitudinal_velocity':self.lon_velocity} 
         df = pd.DataFrame(dict)
         return df
 
@@ -69,6 +72,7 @@ class Vehicle:
 
     def draw(self, screen, number):
         if self.x > 0 :
+            # Draw the car normally within the screen (not yet have visualization for backward loop: TODO)
             car = pygame.draw.rect(screen, self.color, (self.x, self.y, CAR_WIDTH, CAR_HEIGHT))
         else:
             car_previous = pygame.draw.rect(screen, self.color, (self.x+WIDTH, self.y, CAR_WIDTH , CAR_HEIGHT))
@@ -77,7 +81,7 @@ class Vehicle:
         text = font.render(f'{number}' if number != 0 else 'Ego',True, BLACK if number ==0 else WHITE)
         text_car = text.get_rect(center=car.center)
         screen.blit(text,text_car)
-    
+
     def is_ahead_of(self,other_vehicle):
         if self.x > other_vehicle.x:
             return True
@@ -150,22 +154,6 @@ class Simulation:
         self.vehicles = self.initialize_vehicles(randomize=False)
         self.fig, self.axes = plt.subplots(1,2,figsize=(8, 3))  # Create a Matplotlib figure
 
-
-    def update_plot_on_screen(self):
-        for i, vehicle in enumerate(self.vehicles[1:]):
-            lon = vehicle.data_collections.lon_distance
-            lat = vehicle.data_collections.lat_distance
-            speed = vehicle.data_collections.lon_relative_velocity
-            self.axes[i].clear()
-            self.axes[i].plot(lon, speed, label=f"Car {i+1}")
-            self.axes[i].set_title(f"State-space graph of Car {i+1}")
-            self.axes[i].set_xlabel("Longitudinal Distance (pixels)")
-            self.axes[i].set_ylabel("Longitudinal Relative Velocity (pixels/s)")
-            self.axes[i].set_xlim((-50,50))
-            self.axes[i].set_ylim((-20,20))
-            self.axes[i].legend()
-            self.axes[i].grid()
-
     def initialize_vehicles(self,randomize = True):
         vehicles = []
         if randomize:
@@ -234,7 +222,18 @@ class Simulation:
         # Check speed 
         for vehicle in self.vehicles:
             current_time = time.time()
-            vehicle.scaled_speed = (vehicle.x - vehicle.previous_x)/(current_time - vehicle.previous_time)
+            # Calculate the distance traveled, preserving the direction (TODO: looped around from left to right)
+            if vehicle.x < 0 and vehicle.previous_x < WIDTH - CAR_WIDTH and vehicle.previous_x>0 :
+                # Vehicle has looped around from right to left
+                distance_traveled = (vehicle.x) - (vehicle.previous_x - WIDTH)
+            else:
+                # Normal case, no wrapping
+                distance_traveled = vehicle.x - vehicle.previous_x
+
+            # Calculate scaled_speed
+            vehicle.scaled_speed = distance_traveled / (current_time - vehicle.previous_time) if current_time - vehicle.previous_time > 0 else 0
+            if vehicle.scaled_speed/20 < 1 and vehicle.scaled_speed >0:
+                print(f'x is {vehicle.x}, prev_x is {vehicle.previous_x} at problem')
             vehicle.previous_x = vehicle.x 
             vehicle.previous_time = current_time 
 
@@ -244,7 +243,9 @@ class Simulation:
                 vehicle.y += math.copysign(LANE_CHANGING_SPEED, vehicle.target_y - vehicle.y)
             vehicle.move()
             if vehicle.x > WIDTH - CAR_WIDTH:
-                vehicle.x = -CAR_WIDTH  # Loop around the screen
+                vehicle.x = -CAR_WIDTH  # Loop from right to left
+            elif vehicle.x < -CAR_WIDTH:
+                vehicle.x = WIDTH - CAR_WIDTH  # Loop from left to right
 
         # Collision detection and handling
         for i, vehicle1 in enumerate(self.vehicles):
@@ -271,7 +272,7 @@ class Simulation:
             distance_x = calculate_x_distance(ego,vehicle)/20
             distance_y = calculate_y_distance(ego,vehicle)/20
             relative_speed = (vehicle.scaled_speed - ego.scaled_speed)/20
-            vehicle.data_collections.update_value(distance_x,distance_y,relative_speed)
+            vehicle.data_collections.update_value(distance_x,distance_y,relative_speed,ego.scaled_speed/20,vehicle.scaled_speed/20)
             # self.plotters[i].add_data(distance_x, distance_y, relative_speed)
             
     def save_df(self):
