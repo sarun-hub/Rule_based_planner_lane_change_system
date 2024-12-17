@@ -125,7 +125,7 @@ class CarDataVisualizer:
         grid_x_len, grid_y_len = (x_max - x_min) / self.grid_size, (y_max - y_min) / self.grid_size
         for i in range(self.number_of_surrounding_cars):
             # Load the updated data
-            file = f'Car_{i+1}_data.csv'
+            file = f'Car_{i+1}_data_mod.csv'
             data = self.load_dataframe(file)
             lon = data['longitudinal_distance'].to_list()
             speed = data['longitudinal_relative_velocity'].to_list()
