@@ -68,6 +68,7 @@ class Vehicle:
         self.data_collections = DataCollection()
 
     def move(self):
+        print(time.time()-self.previous_time)
         self.x += self.speed
 
     def draw(self, screen, number):
@@ -79,8 +80,8 @@ class Vehicle:
             car = pygame.draw.rect(screen, self.color, (0, self.y, CAR_WIDTH +self.x, CAR_HEIGHT))
         font = pygame.font.Font(None,24)
         text = font.render(f'{number}' if number != 0 else 'Ego',True, BLACK if number ==0 else WHITE)
-        text_car = text.get_rect(center=car.center)
-        screen.blit(text,text_car)
+        text_loc = text.get_rect(center=car.center)
+        screen.blit(text,text_loc)
 
     def is_ahead_of(self,other_vehicle):
         if self.x > other_vehicle.x:
@@ -152,7 +153,6 @@ class Simulation:
         pygame.display.set_caption("Lane Changing Simulation")
         self.clock = pygame.time.Clock()
         self.vehicles = self.initialize_vehicles(randomize=False)
-        self.fig, self.axes = plt.subplots(1,2,figsize=(8, 3))  # Create a Matplotlib figure
 
     def initialize_vehicles(self,randomize = True):
         vehicles = []
@@ -265,8 +265,6 @@ class Simulation:
                         # No collision: Reset color to original
                         vehicle1.color = vehicle1.original_color
                         vehicle2.color = vehicle2.original_color
-
-        ego = self.vehicles[0]
 
         for i,vehicle in enumerate(self.vehicles[1:]):
             distance_x = calculate_x_distance(ego,vehicle)/20
