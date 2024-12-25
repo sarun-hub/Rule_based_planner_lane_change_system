@@ -185,7 +185,7 @@ class Simulation:
             if 0 <= target_lane < NUM_LANES:
                 target_y = target_lane * LANE_WIDTH + LANE_WIDTH // 2 - CAR_HEIGHT // 2
                 # Check if the lane is safe
-                if all(not (v.y == target_y and calculate_x_distance(ego, v) + ego.speed - v.speed < LANE_CHANGE_BUFFER) for v in self.vehicles):
+                if all(not (v.y == target_y and abs(calculate_x_distance(ego, v)) + (ego.speed - v.speed) * ego.time_interval < LANE_CHANGE_BUFFER) for v in self.vehicles):
                     return target_y , ego.speed # Return the new lane if safe
         return ego.y , ego.speed # Stay in the current lane if no safe option
         
@@ -198,9 +198,11 @@ class Simulation:
             print("LESS THAN LANE CHANGE BUFFER")
             print(f"distance is {[calculate_x_distance(ego, v) for v in self.vehicles if v.y == ego.y and not v.ego]}")
             
+            ego.target_y, ego.speed = self.check_lane_change(ego)
+
             # Check if lane change is possible
             safe_lane_change = ego.target_y != ego.y and self.check_lane_change(ego)
-            
+            print(ego.target_y != ego.y)
             if safe_lane_change:
                 ego.target_y, ego.speed = self.check_lane_change(ego)  # Initiate lane change
             else:
@@ -209,8 +211,17 @@ class Simulation:
                 self.ACC(ego)
         else:
             # Ego vehicle is already in target lane or no need for lane change
-            print("ACC is WORKING")
-            self.ACC(ego)
+            if ego.speed >= ego.original_speed:
+                print("ACC is WORKING")
+                self.ACC(ego)
+            else:
+                print(f'{ego.speed}<{ego.original_speed}')
+                print("Returning to OG Speed")
+                self.return_to_og_speed(ego)
+
+    def return_to_og_speed(self,ego):
+        returning_acceleration = 40         # 2 m/s (40 pixels/s)
+        ego.speed += returning_acceleration * ego.time_interval
 
     def ACC(self, ego):
         aggressive = 0.8
