@@ -308,20 +308,20 @@ def vehicle_model(state: Tuple[float, float, float],
     next_vf = vf + (aggressive * d + vp - (1+aggressive*h)*vf - aggressive*delta_min)/h * T
     return next_d, next_vp, next_vf
 
-def cost_function(target: Tuple[float, float],predicted_states: List[Tuple[float, float, float]], input_sequence: List[float]):
+def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tuple[float, float, float]], input_sequence: List[float]):
     """
     Calculate Cost from the predicted states (state cost) and input sequence (input cost)
     """
-    target_d = target[0]
-    target_rel_speed = target[1]
+    
     cost = 0
     Q = np.zeros((3,3))
     Q[0,0] = 0.5
     Q[1,1] = 1
     R = np.zeros((1,1))
     R[0,0] = 1
-    for state in predicted_states:
+    for state,target in zip(predicted_states,targets):
         d, vp, vf = state
+        target_d,target_rel_speed = target
         d_diff = d - target_d
         rel_speed_diff = (vp - vf) - target_rel_speed
         cost = cost + d_diff * Q[0,0] * d_diff + rel_speed_diff * Q[1,1] * rel_speed_diff
@@ -382,7 +382,6 @@ def plot_stat_space(state_space: TrajectoryGenerator,
 
 def main():
     """In Progress for testing the functions"""
-    
     # Initiate state-space and MPC
     distance_range = (5,50)     # Distance range in meters
     rel_speed_range = (-5,5)    # Relative speed range in m/s
