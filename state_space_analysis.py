@@ -35,7 +35,7 @@ class TrajectoryGenerator:
         """Convert continous state into grid indices"""
         if not (self.distance_range[0] <= distance <= self.distance_range[1] and
                 self.rel_speed_range[0] <= rel_speed <= self.rel_speed_range[1]):
-            print(f'{(distance,rel_speed)} is not in the area of interest.')
+            # print(f'{(distance,rel_speed)} is not in the area of interest.')
             return 0,0
         
         i = int((distance - self.distance_range[0])/self.distance_grid_size)
@@ -76,14 +76,11 @@ class TrajectoryGenerator:
             print('The state-space graph is fully covered.')
             return []
 
-        # print(empty_cells)
-        # print(np.sqrt((empty_cells[0][0]-current_distance)**2+(empty_cells[0][1]-current_rel_speed)**2))
         # Calculate distances to all empty cells
         distances = [np.sqrt((cell[0] - current_distance)**2 + 
                              (cell[1] - current_rel_speed)**2) 
                              for cell in empty_cells]
 
-        # print(distances)
         min_distance = np.min(distances)
         
         closest_cells = [cell for cell, dist in zip(empty_cells, distances)
@@ -168,7 +165,6 @@ class TrajectoryGenerator:
     def find_best_trajectory(self, current_distance: float, current_rel_speed: float):
         """Find the best trajectory (from num_samples samples) to the closest cells"""
         closest_cells = self.find_closest_empty_cells(current_distance, current_rel_speed)
-
         if not closest_cells:
             print('There is no closest cells.')
             return []
@@ -183,9 +179,9 @@ class TrajectoryGenerator:
             for _ in range(self.num_samples):
                 # Generate random trajectory to this end cell
                 trajectory = self.generate_trajectory(
-                    current_distance, current_rel_speed,
-                    end_cell[0], end_cell[1]
-                )
+                        current_distance,end_cell[0],
+                        current_rel_speed, end_cell[1]
+                    )
 
                 trajectories.append(trajectory)
                 # Evaluate trajectory
@@ -380,6 +376,7 @@ def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tupl
             cost = cost + diff_cont * R[0,0] * diff_cont
 
     return cost
+
 
 def main():
     """In Progress for testing the functions"""
