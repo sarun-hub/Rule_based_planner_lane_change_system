@@ -35,7 +35,7 @@ class TrajectoryGenerator:
         """Convert continous state into grid indices"""
         if not (self.distance_range[0] <= distance <= self.distance_range[1] and
                 self.rel_speed_range[0] <= rel_speed <= self.rel_speed_range[1]):
-            # print(f'{(distance,rel_speed)} is not in the area of interest.')
+            print(f'{(distance,rel_speed)} is not in the area of interest.')
             return 0,0
         
         i = int((distance - self.distance_range[0])/self.distance_grid_size)
@@ -212,11 +212,11 @@ class TrajectoryGenerator:
 
                 # Fill color to visited cells
                 if self.state_space[i,j] == 1:
-                    color_rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size,color = 'red', alpha = 0.5)
+                    color_rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size,edgecolor = 'black',facecolor='lightblue', alpha=0.5)
                     ax.add_patch(color_rect)
                 else : 
                 # Draw grid line for empty cell
-                    rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size)
+                    rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size,edgecolor = 'black',facecolor='none')
                     ax.add_patch(rect)
 
         # Plot random trajectories with low opacity
@@ -397,7 +397,7 @@ def main():
     max_steps = 10
     # Generate and evaluate trajectories
     for step in range(max_steps):
-        
+        state_space.marked_visited(state[0],state[1])
         input_sequences = mpc.generate_random_inputs()
         costs = mpc.compute_costs(state, input_sequences)
         optimal_input_sequence, optimal_cost = mpc.select_optimal_input_sequence(input_sequences,costs)
