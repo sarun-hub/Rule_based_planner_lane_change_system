@@ -29,6 +29,7 @@ class TrajectoryGenerator:
         # Initialize state-space grid (0 for empty, 1 for filled)
         self.state_space = np.zeros((self.grid_resolution[0], self.grid_resolution[1]))
         self.best_trajectory = None
+        self.trajectories = None
 
     def state_to_grid(self, distance: float, rel_speed: float):
         """Convert continous state into grid indices"""
@@ -75,12 +76,15 @@ class TrajectoryGenerator:
             print('The state-space graph is fully covered.')
             return []
 
+        # print(empty_cells)
+        # print(np.sqrt((empty_cells[0][0]-current_distance)**2+(empty_cells[0][1]-current_rel_speed)**2))
         # Calculate distances to all empty cells
         distances = [np.sqrt((cell[0] - current_distance)**2 + 
-                             (cell[1] - current_rel_speed)) 
+                             (cell[1] - current_rel_speed)**2) 
                              for cell in empty_cells]
 
-        min_distance = min(distances)
+        # print(distances)
+        min_distance = np.min(distances)
         
         closest_cells = [cell for cell, dist in zip(empty_cells, distances)
                          if abs(dist - min_distance) <= tolerance]
@@ -169,6 +173,7 @@ class TrajectoryGenerator:
             print('There is no closest cells.')
             return []
         
+        trajectories = []
         best_trajectory = []
         max_new_cells = 0
         min_length = float('inf')
@@ -182,6 +187,7 @@ class TrajectoryGenerator:
                     end_cell[0], end_cell[1]
                 )
 
+                trajectories.append(trajectory)
                 # Evaluate trajectory
                 new_cells, length = self.evaluate_trajectory(trajectory)
 
@@ -191,8 +197,51 @@ class TrajectoryGenerator:
                     min_length = length
                     best_trajectory = trajectory
 
+        self.trajectories = trajectories
         self.best_trajectory = best_trajectory
+
         return best_trajectory
+    
+    def plot_stat_space(self):
+        """Visualize a state-space and trajectories."""
+        fig, ax = plt.subplots(figsize=(10,6))
+
+        # Draw grid
+        for i in range(self.grid_resolution[0]):
+            for j in range(self.grid_resolution[1]):
+                # Determine cell position
+                distance = self.distance_range[0] + i * self.distance_grid_size
+                rel_speed = self.rel_speed_range[0] + j * self.rel_speed_grid_size
+
+
+                # Fill color to visited cells
+                if self.state_space[i,j] == 1:
+                    color_rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size,color = 'red', alpha = 0.5)
+                    ax.add_patch(color_rect)
+                else : 
+                # Draw grid line for empty cell
+                    rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size)
+                    ax.add_patch(rect)
+
+        # Plot random trajectories with low opacity
+        for trajectory in self.trajectories:
+            x, y = zip(*trajectory)
+            ax.plot(x, y, color='blue', alpha=0.5, linestyle='--', linewidth=1)
+
+        # Plot best trajectory with high opacity
+        if self.best_trajectory:
+            x, y = zip(*self.best_trajectory)
+            ax.plot(x, y, color='green', alpha=1.0, linewidth=2, label='Best Trajectory')
+            ax.scatter(x, y, color='green', alpha=1.0)
+
+        # Set labels and title
+        ax.set_xlabel("Distance (m)")
+        ax.set_ylabel("Relative Speed (m/s)")
+        ax.set_title("State-Space and Trajectories")
+        ax.set_xlim(self.distance_range)
+        ax.set_ylim(self.rel_speed_range)
+        ax.legend()
+        plt.show()
 
 class SamplingBasedMPC():
     def __init__(self, model: Callable[[Tuple[float,float,float],float, float, float, float, float], Tuple[float,float,float]],
@@ -250,8 +299,7 @@ class SamplingBasedMPC():
         constraint_distance = (self.state_space.distance_range[0],self.state_space.distance_range[1])
         for input_sequence in input_sequences:
             predicted_states = self.predict_states(initial_state, input_sequence)
-            # cost = self.cost_function(self.state_space.find_best_trajectory(initial_state[0],initial_state[1])[0],predicted_states, input_sequence)
-            cost = self.cost_function((20,5),predicted_states, input_sequence)
+            cost = self.cost_function(self.state_space.find_best_trajectory(initial_state[0],(initial_state[1]-initial_state[2])),predicted_states, input_sequence)
             if not all(constraint_distance[0]<=state[0]<=constraint_distance[0] for state in predicted_states):
                 cost = cost + 1e6
 
@@ -312,7 +360,6 @@ def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tupl
     """
     Calculate Cost from the predicted states (state cost) and input sequence (input cost)
     """
-    
     cost = 0
     Q = np.zeros((3,3))
     Q[0,0] = 0.5
@@ -334,52 +381,6 @@ def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tupl
 
     return cost
 
-def plot_stat_space(state_space: TrajectoryGenerator,
-                    trajectories: List[List[Tuple[float,float]]],
-                    best_trajectory: List[Tuple[float,float]]):
-    """Visualize a state-space and trajectories."""
-    fig, ax = plt.subplots(figsize=(10,6))
-
-    # Draw grid
-    for i in range(state_space.grid_resolution[0]):
-        for j in range(state_space.grid_resolution[1]):
-            # Determine cell position
-            distance = state_space.distance_range[0] + i * state_space.distance_grid_size
-            rel_speed = state_space.rel_speed_range[0] + j * state_space.rel_speed_grid_size
-
-
-            # Fill color to visited cells
-            if state_space.state_space[i,j] == 1:
-                color_rect = Rectangle((distance,rel_speed),state_space.distance_grid_size,state_space.rel_speed_grid_size,color = 'red', alpha = 0.5)
-                ax.add_patch(color_rect)
-            else : 
-            # Draw grid line for empty cell
-                rect = Rectangle((distance,rel_speed),state_space.distance_grid_size,state_space.rel_speed_grid_size)
-                ax.add_patch(rect)
-
-    # Plot random trajectories with low opacity
-    for trajectory in trajectories:
-        x, y = zip(*trajectory)
-        ax.plot(x, y, color='blue', alpha=0.5, linestyle='--', linewidth=1)
-
-    # Plot best trajectory with high opacity
-    if best_trajectory:
-        x, y = zip(*best_trajectory)
-        ax.plot(x, y, color='green', alpha=1.0, linewidth=2, label='Best Trajectory')
-        ax.scatter(x, y, color='green', alpha=1.0)
-
-
-    # Set labels and title
-    ax.set_xlabel("Distance (m)")
-    ax.set_ylabel("Relative Speed (m/s)")
-    ax.set_title("State-Space and Trajectories")
-    ax.set_xlim(state_space.distance_range)
-    ax.set_ylim(state_space.rel_speed_range)
-    ax.legend()
-    plt.show()
-
-        
-
 def main():
     """In Progress for testing the functions"""
     # Initiate state-space and MPC
@@ -393,19 +394,23 @@ def main():
     mpc = SamplingBasedMPC(vehicle_model,cost_function, N, num_samples, state_space)
 
     # Define initial state
-    initial_state = (12, 5, 0)  # Distance, preceding vehicle speed, following vehicle speed
+    initial_state = (12, 3, 0)  # Distance, preceding vehicle speed, following vehicle speed
 
+    state = initial_state
+    max_steps = 10
     # Generate and evaluate trajectories
-    input_sequences = mpc.generate_random_inputs()
-    costs = mpc.compute_costs(initial_state, input_sequences)
-    optimal_input_sequence, _ = mpc.select_optimal_input_sequence(input_sequences,costs)
+    for step in range(max_steps):
+        
+        input_sequences = mpc.generate_random_inputs()
+        costs = mpc.compute_costs(state, input_sequences)
+        optimal_input_sequence, optimal_cost = mpc.select_optimal_input_sequence(input_sequences,costs)
+        optimal_input = optimal_input_sequence[0]
+        print(f'Optimal acceleration is {optimal_input} with cost {optimal_cost}.')
+        state = vehicle_model(state,optimal_input)
 
-    # Simulate and visualize
-    trajectories = [mpc.predict_states(initial_state,input_sequence) for input_sequence in input_sequences]
-    best_trajectory = mpc.predict_states(initial_state,optimal_input_sequence)
 
     # Visualize state-space and trajectory
-    plot_stat_space(state_space,trajectories, best_trajectory)
+    state_space.plot_stat_space()
 
 if __name__ == '__main__':
     main()
