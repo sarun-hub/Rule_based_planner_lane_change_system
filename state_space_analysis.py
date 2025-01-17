@@ -3,6 +3,8 @@ from typing import Tuple, List, Callable
 import random
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from matplotlib.animation import FuncAnimation
+
 
 class TrajectoryGenerator:
     def __init__(self, distance_range: Tuple[float,float],
@@ -30,6 +32,10 @@ class TrajectoryGenerator:
         self.state_space = np.zeros((self.grid_resolution[0], self.grid_resolution[1]))
         self.best_trajectory = None
         self.trajectories = None
+        self.states = []
+        self.all_trajectories = []
+        self.all_best_trajectories = []
+        self.color_state_space = np.zeros((self.grid_resolution[0], self.grid_resolution[1]))
 
     def state_to_grid(self, distance: float, rel_speed: float):
         """Convert continous state into grid indices"""
@@ -45,6 +51,7 @@ class TrajectoryGenerator:
     def marked_visited(self, distance: float, rel_speed: float):
         """Mark a grid cell as visited from the state (distance, rel_speed)"""
         i,j = self.state_to_grid(distance, rel_speed)
+        self.states.append((distance,rel_speed))
         self.state_space[i,j] = 1
 
     def is_visited(self, distance: float, rel_speed: float):
@@ -85,7 +92,7 @@ class TrajectoryGenerator:
         
         closest_cells = [cell for cell, dist in zip(empty_cells, distances)
                          if abs(dist - min_distance) <= tolerance]
-        
+
         return closest_cells
     
     def generate_trajectory(self, start_distance: float, end_distance:float,
@@ -123,6 +130,7 @@ class TrajectoryGenerator:
         coeffs = np.polyfit(x, distances, 3)
         # Find coefficent of relative speed (which is derivative of distance)
         rel_speed_coeffs = np.polyder(coeffs)
+        # rel_speed_coeffs = np.polyfit(x,rel_speeds,3)
 
         for time in t:
             # Calculate distance at any time step
@@ -132,6 +140,8 @@ class TrajectoryGenerator:
             rel_speed = np.polyval(rel_speed_coeffs, time)
 
             trajectory.append((distance, rel_speed))
+        
+        # print(trajectory[0])
         
         return trajectory
     
@@ -164,6 +174,7 @@ class TrajectoryGenerator:
     
     def find_best_trajectory(self, current_distance: float, current_rel_speed: float):
         """Find the best trajectory (from num_samples samples) to the closest cells"""
+        # print(current_distance,current_rel_speed)
         closest_cells = self.find_closest_empty_cells(current_distance, current_rel_speed)
         if not closest_cells:
             print('There is no closest cells.')
@@ -195,13 +206,16 @@ class TrajectoryGenerator:
 
         self.trajectories = trajectories
         self.best_trajectory = best_trajectory
+        self.all_best_trajectories.append(best_trajectory)
+        self.all_trajectories.append(trajectories)
 
         return best_trajectory
     
-    def plot_stat_space(self):
+    def plot_stat_space(self,max_steps,show = True,save_path = None):
         """Visualize a state-space and trajectories."""
         fig, ax = plt.subplots(figsize=(10,6))
 
+        rectangles = {}
         # Draw grid
         for i in range(self.grid_resolution[0]):
             for j in range(self.grid_resolution[1]):
@@ -209,26 +223,22 @@ class TrajectoryGenerator:
                 distance = self.distance_range[0] + i * self.distance_grid_size
                 rel_speed = self.rel_speed_range[0] + j * self.rel_speed_grid_size
 
+                # Create grid cell
+                rect = Rectangle((distance, rel_speed), self.distance_grid_size, self.rel_speed_grid_size,
+                                edgecolor='black', facecolor='none')
+                
+                ax.add_patch(rect)
+                rectangles[(i, j)] = rect
 
-                # Fill color to visited cells
-                if self.state_space[i,j] == 1:
-                    color_rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size,edgecolor = 'black',facecolor='lightblue', alpha=0.5)
-                    ax.add_patch(color_rect)
-                else : 
-                # Draw grid line for empty cell
-                    rect = Rectangle((distance,rel_speed),self.distance_grid_size,self.rel_speed_grid_size,edgecolor = 'black',facecolor='none')
-                    ax.add_patch(rect)
+        # Initialize trajectory line
+        random_trajectories = [ax.plot([], [], color='blue', alpha=0.3, linestyle='--', linewidth=0.5)[0] for _ in range(self.num_samples)]
+        best_trajectory_line, = ax.plot([], [], color='green', linewidth=2, label='Best Trajectory')
 
-        # Plot random trajectories with low opacity
-        for trajectory in self.trajectories:
-            x, y = zip(*trajectory)
-            ax.plot(x, y, color='blue', alpha=0.5, linestyle='--', linewidth=1)
+        # Initialize scatter points for trajectory
+        # scatter_points = ax.scatter([], [], color='green', alpha=1.0)
 
-        # Plot best trajectory with high opacity
-        if self.best_trajectory:
-            x, y = zip(*self.best_trajectory)
-            ax.plot(x, y, color='green', alpha=1.0, linewidth=2, label='Best Trajectory')
-            ax.scatter(x, y, color='green', alpha=1.0)
+        current_state_scatter = ax.scatter([],[], color = 'red')
+        previous_state_scatter = ax.scatter([],[], color = 'grey', alpha = 0.5)
 
         # Set labels and title
         ax.set_xlabel("Distance (m)")
@@ -237,8 +247,71 @@ class TrajectoryGenerator:
         ax.set_xlim(self.distance_range)
         ax.set_ylim(self.rel_speed_range)
         ax.legend()
-        plt.show()
+        
+        def init():
+            """Initialize animation."""
+            # Reset grid colors
+            for rect in rectangles.values():
+                rect.set_facecolor('none')
+                rect.set_alpha(1.0)
 
+            # Reset scatter points and lines
+            for traj_line in random_trajectories:
+                traj_line.set_data([], [])
+            best_trajectory_line.set_data([], [])
+            current_state_scatter.set_offsets(np.empty((0, 2)))
+            previous_state_scatter.set_offsets(np.empty((0, 2)))
+
+            return random_trajectories + [best_trajectory_line, current_state_scatter, previous_state_scatter] + list(rectangles.values())
+
+        def update(step):
+            """Update animation at each step"""
+            current_state = self.states[step]
+            # Update visited cells
+            
+            i, j = self.state_to_grid(current_state[0], current_state[1])
+            rect = rectangles[(i,j)]
+            rect.set_facecolor('lightblue')
+            rect.set_alpha(0.5)
+            
+            
+            # Update scatter for current state
+            
+            current_state_scatter.set_offsets([current_state[:2]])  # Only use (distance, rel_speed)
+            
+            if step > 0:
+                previous_state = np.array([(state[0], state[1]) for state in self.states[:step]])
+            else:
+                previous_state = np.empty((0, 2))  # Empty array with shape (0, 2)
+
+            previous_state_scatter.set_offsets(previous_state)
+
+            # Update random trajectories
+            trajectories = self.all_trajectories[step]
+            for traj_line, trajectory in zip(random_trajectories, trajectories):
+                x, y = zip(*[(state[0], state[1]) for state in trajectory])
+                traj_line.set_data(x, y)
+
+            # Update best trajectory
+            best_trajectory = self.all_best_trajectories[step]
+            x_opt, y_opt = zip(*[(state[0], state[1]) for state in best_trajectory])
+            best_trajectory_line.set_data(x_opt, y_opt)
+            # scatter_points.set_offsets(list(zip(x_opt, y_opt)))
+
+            # return random_trajectories + [best_trajectory_line, scatter_points, current_state_scatter] + list(rectangles.values())
+            return random_trajectories + [best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
+        
+        # Animate
+        anim = FuncAnimation(fig, update, frames=max_steps, init_func=init , interval=500, blit=False, repeat = True, )
+
+        # Save the animation
+        if save_path:
+            anim.save(save_path, fps=2, writer='pillow')
+            print(f"Animation saved to {save_path}")
+
+        if show :
+            plt.show()
+            
 class SamplingBasedMPC():
     def __init__(self, model: Callable[[Tuple[float,float,float],float, float, float, float, float], Tuple[float,float,float]],
                  cost_function: Callable[[Tuple[float, float],List[Tuple[float, float, float]]],List[float]],
@@ -293,9 +366,10 @@ class SamplingBasedMPC():
         """
         costs = []
         constraint_distance = (self.state_space.distance_range[0],self.state_space.distance_range[1])
+        target_list =self.state_space.find_best_trajectory(initial_state[0],(initial_state[1]-initial_state[2]))
         for input_sequence in input_sequences:
             predicted_states = self.predict_states(initial_state, input_sequence)
-            cost = self.cost_function(self.state_space.find_best_trajectory(initial_state[0],(initial_state[1]-initial_state[2])),predicted_states, input_sequence)
+            cost = self.cost_function(target_list,predicted_states, input_sequence)
             if not all(constraint_distance[0]<=state[0]<=constraint_distance[0] for state in predicted_states):
                 cost = cost + 1e6
 
@@ -358,7 +432,7 @@ def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tupl
     """
     cost = 0
     Q = np.zeros((3,3))
-    Q[0,0] = 0.5
+    Q[0,0] = 1
     Q[1,1] = 1
     R = np.zeros((1,1))
     R[0,0] = 1
@@ -394,20 +468,20 @@ def main():
     initial_state = (12, 3, 0)  # Distance, preceding vehicle speed, following vehicle speed
 
     state = initial_state
-    max_steps = 10
+    max_steps = 100
     # Generate and evaluate trajectories
     for step in range(max_steps):
-        state_space.marked_visited(state[0],state[1])
+        state_space.marked_visited(state[0],state[1]-state[2])
         input_sequences = mpc.generate_random_inputs()
         costs = mpc.compute_costs(state, input_sequences)
         optimal_input_sequence, optimal_cost = mpc.select_optimal_input_sequence(input_sequences,costs)
         optimal_input = optimal_input_sequence[0]
-        print(f'Optimal acceleration is {optimal_input} with cost {optimal_cost}.')
+        # print(f'Optimal acceleration is {optimal_input} with cost {optimal_cost}.')
         state = vehicle_model(state,optimal_input)
 
 
     # Visualize state-space and trajectory
-    state_space.plot_stat_space()
+    state_space.plot_stat_space(max_steps,show = False, save_path='state_space_animation_4.gif')
 
 if __name__ == '__main__':
     main()
