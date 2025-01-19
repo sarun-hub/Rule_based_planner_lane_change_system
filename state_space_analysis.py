@@ -36,6 +36,10 @@ class TrajectoryGenerator:
         self.all_trajectories = []
         self.all_best_trajectories = []
         self.color_state_space = np.zeros((self.grid_resolution[0], self.grid_resolution[1]))
+        self.predicted_states = []
+
+    def add_predicted_state(self,predicted_state):
+        self.predicted_states.append(predicted_state)
 
     def state_to_grid(self, distance: float, rel_speed: float):
         """Convert continous state into grid indices"""
@@ -129,8 +133,8 @@ class TrajectoryGenerator:
         # Fit cubic spline for distance
         coeffs = np.polyfit(x, distances, 3)
         # Find coefficent of relative speed (which is derivative of distance)
-        rel_speed_coeffs = np.polyder(coeffs)
-        # rel_speed_coeffs = np.polyfit(x,rel_speeds,3)
+        # rel_speed_coeffs = np.polyder(coeffs)
+        rel_speed_coeffs = np.polyfit(x,rel_speeds,3)
 
         for time in t:
             # Calculate distance at any time step
@@ -232,7 +236,8 @@ class TrajectoryGenerator:
 
         # Initialize trajectory line
         random_trajectories = [ax.plot([], [], color='blue', alpha=0.3, linestyle='--', linewidth=0.5)[0] for _ in range(self.num_samples)]
-        best_trajectory_line, = ax.plot([], [], color='green', linewidth=2, label='Best Trajectory')
+        best_trajectory_line, = ax.plot([], [], color='green', linewidth=2, label='Best Target Trajectory')
+        predicted_state_line, = ax.plot([], [], color='purple', linewidth=2, label='Predicted State')
 
         # Initialize scatter points for trajectory
         # scatter_points = ax.scatter([], [], color='green', alpha=1.0)
@@ -259,6 +264,7 @@ class TrajectoryGenerator:
             for traj_line in random_trajectories:
                 traj_line.set_data([], [])
             best_trajectory_line.set_data([], [])
+            predicted_state_line.set_data([], [])
             current_state_scatter.set_offsets(np.empty((0, 2)))
             previous_state_scatter.set_offsets(np.empty((0, 2)))
 
@@ -297,6 +303,10 @@ class TrajectoryGenerator:
             x_opt, y_opt = zip(*[(state[0], state[1]) for state in best_trajectory])
             best_trajectory_line.set_data(x_opt, y_opt)
             # scatter_points.set_offsets(list(zip(x_opt, y_opt)))
+
+            predicted_state = self.predicted_states[step]
+            predicted_x, predicted_y = zip(*[(state[0],state[1]) for state in predicted_state])
+            predicted_state_line.set_data(predicted_x, predicted_y)
 
             # return random_trajectories + [best_trajectory_line, scatter_points, current_state_scatter] + list(rectangles.values())
             return random_trajectories + [best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
@@ -476,12 +486,15 @@ def main():
         costs = mpc.compute_costs(state, input_sequences)
         optimal_input_sequence, optimal_cost = mpc.select_optimal_input_sequence(input_sequences,costs)
         optimal_input = optimal_input_sequence[0]
+        predicted_state = mpc.predict_states(state,optimal_input_sequence)
+        predicted_state = [(state_[0],state_[1]-state_[2]) for state_ in predicted_state]
+        state_space.add_predicted_state(predicted_state)
         # print(f'Optimal acceleration is {optimal_input} with cost {optimal_cost}.')
         state = vehicle_model(state,optimal_input)
 
 
     # Visualize state-space and trajectory
-    state_space.plot_stat_space(max_steps,show = False, save_path='state_space_animation_4.gif')
+    state_space.plot_stat_space(max_steps,show = False, save_path='state_space_animation_6.gif')
 
 if __name__ == '__main__':
     main()
