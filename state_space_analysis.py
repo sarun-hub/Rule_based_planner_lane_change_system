@@ -411,7 +411,7 @@ input_weight = 1
 
 def main():
     """In Progress for testing the functions"""
-    from MPC_util import SamplingBasedMPC, OptimizationBasedMPC
+    from MPC_utils import SamplingBasedMPC, OptimizationBasedMPC
 
     # Initiate state-space and MPC
     distance_range = (5,50)     # Distance range in meters
