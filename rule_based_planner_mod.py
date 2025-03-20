@@ -1,8 +1,12 @@
 import pygame
+import numpy as np
 import time
 import random
 import math
 import pandas as pd
+from typing import Tuple, List
+from MPC_utils import SamplingBasedMPC, OptimizationBasedMPC
+from state_space_analysis import TrajectoryGenerator, get_unique_filepath
 
 # Initialize Pygame
 pygame.init()
@@ -29,6 +33,118 @@ CAR_WIDTH, CAR_HEIGHT = 91, 35
 MAX_SPEED = 5
 LANE_CHANGING_SPEED = 5
 LANE_CHANGE_BUFFER = 200    # Minimum gap for lane change
+
+# Set Global weight
+distance_weight = 1
+rel_speed_weight = 1
+input_weight = 1
+
+# Set Global range (for state-space analysis)
+distance_range = (5,50)     # Distance range in meters
+rel_speed_range = (-5,5)    # Relative speed range in m/s
+grid_resolution = (10,10)   # Grid resolution
+num_samples = 20
+N = 20
+
+# Set Global deadtime
+global_deadtime = 0.3
+global_tolerance = 1e-5
+
+# Initialize optimal input sequence
+optimal_input_sequence = np.zeros(N)
+
+# Define vehicle model for surrounding vehicle 1
+def vehicle_model(state: Tuple[float, float, float], 
+                 control_input: float,
+                 aggressive: float = 0.8,
+                 h: float = 1.0,
+                 delta_min: float = 5.0,
+                 T: float = 0.1,
+                 deadtime: float = global_deadtime,
+                 tolerance: float = global_tolerance) -> Tuple[float, float, float]:
+    """
+    Vehicle dynamics model calculating next state based on current state and control input.
+
+    :param
+        state: Tuple of (distance, preceding vehicle velocity, following vehicle velocity)
+        control_input: Acceleration input for the preceding vehicle
+        aggressive: Aggressiveness factor
+        h: Time headway (s)
+        delta_min: Minimum safe distance (meter)
+        T: Time step (s)
+        deadtime: System delay (s)
+
+    :return: Tuple of next state (next_distance, next_vp, next_vf)
+    """
+    d, vp, vf = state
+    # Initialize state history if not exists (for the beginning)
+    if not hasattr(vehicle_model,'state_history'):
+        vehicle_model.state_history = []
+        vehicle_model.time_history = []
+        vehicle_model.current_time = 0
+    
+    # Update current time
+    vehicle_model.current_time += T
+
+    # Store current state and time
+    vehicle_model.state_history.append(state)
+    vehicle_model.time_history.append(vehicle_model.current_time)
+    
+    # Remove old states beyond deadtime
+    while (vehicle_model.current_time - vehicle_model.time_history[0]) - deadtime > tolerance:
+        vehicle_model.state_history.pop(0)
+        vehicle_model.time_history.pop(0)
+    
+    # Get delayed state for ACC calculation
+    if len(vehicle_model.state_history) > 0:
+        delayed_d, delayed_vp, delayed_vf = vehicle_model.state_history[0]
+        # print(vehicle_model.current_time - vehicle_model.time_history[0])
+    else:
+        delayed_d, delayed_vp, delayed_vf = state
+    
+    next_d = d + (vp-vf) * T
+    next_vp = vp + control_input * T
+    
+     # Calculate following vehicle acceleration using delayed states
+    acc = (aggressive * delayed_d + delayed_vp - 
+           (1 + aggressive * h) * delayed_vf - 
+           aggressive * delta_min) / h
+    
+    # Add safety margin due to deadtime
+    safety_factor = 1.2  # Increase safety margin by 20%
+    if delayed_d < (delta_min * safety_factor):
+        acc = min(acc, -2)  # Stronger deceleration for safety
+    
+    # Update following vehicle velocity using calculated acceleration
+    next_vf = vf + acc * T
+
+    return next_d, next_vp, next_vf
+
+# Define cost fin
+def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tuple[float, float, float]], input_sequence: List[float]):
+    """
+    Calculate Cost from the predicted states (state cost) and input sequence (input cost)
+    """
+    cost = 0
+    Q = np.zeros((3,3))
+    Q[0,0] = distance_weight
+    Q[1,1] = rel_speed_weight
+    R = np.zeros((1,1))
+    R[0,0] = input_weight
+    for state,target in zip(predicted_states,targets):
+        d, vp, vf = state
+        target_d,target_rel_speed = target
+        d_diff = d - target_d
+        rel_speed_diff = (vp - vf) - target_rel_speed
+        cost = cost + d_diff * Q[0,0] * d_diff + rel_speed_diff * Q[1,1] * rel_speed_diff
+
+    for k in range(len(input_sequence)):
+        if k > 0:
+            previous_cont = input_sequence[k-1]
+            diff_cont = input_sequence[k] - previous_cont
+            cost = cost + diff_cont * R[0,0] * diff_cont
+
+    return cost
 
 class DataCollection:
     def __init__(self):
@@ -144,6 +260,7 @@ class Simulation:
         pygame.display.set_caption("Lane Changing Simulation")
         self.clock = pygame.time.Clock()
         self.vehicles = self.initialize_vehicles(randomize = False)
+        self.initialize_sur1_controller()
         self.offset = 0
 
     def initialize_vehicles(self, randomize = True):
@@ -202,7 +319,7 @@ class Simulation:
 
             # Check if lane change is possible
             safe_lane_change = ego.target_y != ego.y and self.check_lane_change(ego)
-            print(ego.target_y != ego.y)
+            print(f'Try Changing lane: {ego.target_y != ego.y}')
             if safe_lane_change:
                 ego.target_y, ego.speed = self.check_lane_change(ego)  # Initiate lane change
             else:
@@ -223,15 +340,118 @@ class Simulation:
         returning_acceleration = 40         # 2 m/s (40 pixels/s)
         ego.speed += returning_acceleration * ego.time_interval
 
+    def initialize_sur1_controller(self):
+        self.state_space = TrajectoryGenerator(distance_range, rel_speed_range, grid_resolution, num_samples, N, derivative= False)
+        # ======================== SET MODE =========================== #
+        self.mode = 'sampling'
+
+        # initialize mpc
+        sampling_mpc = SamplingBasedMPC(vehicle_model,cost_function, N, num_samples, self.state_space)
+        optimize_mpc = OptimizationBasedMPC(vehicle_model,cost_function,N,self.state_space)
+
+        self.mpc = sampling_mpc if self.mode == 'sampling' else optimize_mpc
+
+        for vehicle in self.vehicles:
+            if vehicle.ego :
+                ego = vehicle
+
+        for vehicle in self.vehicles:
+            if vehicle.x >= ego.x and vehicle.y == ego.y and vehicle.ego == False:
+                sur1 = vehicle
+                break
+        self.sur1 = sur1
+
+    def surrounding1_controller(self):
+        for vehicle in self.vehicles:
+            if vehicle.ego :
+                ego = vehicle
+        
+        # for vehicle in self.vehicles:
+        #     if vehicle.x >= ego.x and vehicle.y == ego.y and vehicle.ego == False:
+        #         sur1 = vehicle
+        #         break
+        sur1 = self.sur1
+
+        # Mark visited grid and initialize state (with unit meter)
+        distance = calculate_x_distance(ego,sur1)/20
+        relative_speed = (sur1.scaled_speed - ego.scaled_speed)/20
+        state = (distance,sur1.scaled_speed/20,ego.scaled_speed/20)
+        self.state_space.marked_visited(distance, relative_speed)
+        
+        # solve for optimal input sequence
+        if self.mode == 'optimize':
+            optimal_input_sequence = self.mpc.solve(state,optimal_input_sequence)
+        elif self.mode == 'sampling':
+            optimal_input_sequence = self.mpc.solve(state)
+
+        optimal_input = optimal_input_sequence[0]
+        
+        # update in state space analysis
+        predicted_state = self.mpc.predict_states(state,optimal_input_sequence)
+        predicted_state = [(state_[0],state_[1]-state_[2]) for state_ in predicted_state]
+
+        self.state_space.add_predicted_state(predicted_state)
+
+        # Set acceleration of surrounding car 1 (with unit pixel)
+        sur1.acceleration = optimal_input*20
+        print(f'sur1 acceleration is {sur1.acceleration}')
+
+
     def ACC(self, ego):
         aggressive = 0.8
         h = 1                   # Headway time
         delta_min = 5          # Minimum safe distance   (5 meter -> 100 pixels)
+        deadtime = global_deadtime
+        tolerance = global_tolerance
+
+        # TODO: Need to adjust to Dynamic!!
+        # for vehicle in self.vehicles:
+        #     if vehicle.x >= ego.x and vehicle.y == ego.y and vehicle.ego == False:
+        #         sur1 = vehicle
+        #         break
+        sur1 = self.sur1
+
+        # Store historical control action
+        if not hasattr(ego,'control_history'):
+            ego.control_history = []
+
+        current_time = time.time()
+
+        # Add current state to history
+        ego.control_history.append({
+            'time': current_time,
+            'distance': calculate_x_distance(ego,sur1),
+            'preceding_speed': sur1.speed,
+            'speed': ego.speed,
+            'acceleration': ego.acceleration
+        })
+
+        # Remove old control actions beyond deadtime
+        ego.control_history = [
+            control for control in ego.control_history 
+            if (current_time - control['time']) - deadtime <= tolerance
+        ]
+
+        # Get the delayed state (from deadtime ago)
+        delayed_state = ego.control_history[0] if ego.control_history else None
+
+        # Use delayed state if available, otherwise use current state
+        # control_speed = delayed_state['speed'] if delayed_state else ego.speed
+        delayed_d = delayed_state['distance'] if delayed_state else calculate_x_distance(ego,sur1)
+        delayed_vp = delayed_state['preceding_speed'] if delayed_state else sur1.speed
+        delayed_vf = delayed_state['speed'] if delayed_state else ego.speed
+
         for v in self.vehicles:
             if v.y == ego.y and v.x - ego.x > 0:
                 delta = calculate_x_distance(ego, v)
-                desired_speed = max(0, (v.speed - aggressive * (h * ego.speed + delta_min*20 - delta)))
-                ego.acceleration = (desired_speed - ego.speed) / h
+                # desired_speed = max(0, (v.speed - aggressive * (h * ego.speed + delta_min*20 - delta)))
+                # ego.acceleration = (desired_speed - ego.speed) / h
+                # desired_speed = max(0, (v.speed - aggressive * (h * control_speed + delta_min*20 - delta)))
+                # ego.acceleration = (desired_speed - control_speed) / h
+                acc = (aggressive * delayed_d + delayed_vp - 
+                        (1 + aggressive * h) * delayed_vf - 
+                        aggressive * delta_min) / h
+                ego.acceleration = acc
           
     def update(self):
         for vehicle in self.vehicles:
@@ -239,6 +459,9 @@ class Simulation:
                 ego = vehicle
         # Rule-based lane changing
         self.rule_based_lane_change()
+
+        # MPC for surrounding vehicle 1
+        self.surrounding1_controller()
 
         # Update vehicle positions
         for vehicle in self.vehicles:
@@ -291,7 +514,7 @@ class Simulation:
     def save_df(self):
         for i,vehicle in enumerate(self.vehicles[1:]):
             df = vehicle.data_collections.update_DataFrame()
-            df.to_csv(f'Car_{i+1}_data_mod.csv',index=False)
+            df.to_csv(f'Car_{i+1}_data_mod_delayed.csv',index=False)
 
     def show_verbose(self):
         ego = self.vehicles[0]
@@ -413,6 +636,9 @@ class Simulation:
                 pygame.display.flip()
 
             self.clock.tick(FPS)
+        print('Saving files!')
+        save_path = get_unique_filepath('SamplingBasedMPC_pygame','state_space_animation','.gif')
+        self.state_space.plot_stat_space(100,show = False, save_path=save_path)    
         pygame.quit()
 
 if __name__ == "__main__":
