@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Tuple, List 
 import os
-# from MPC_util import SamplingBasedMPC, OptimizationBasedMPC
+# from MPC_utils import SamplingBasedMPC, OptimizationBasedMPC      # Cannot import here since MPC_utils also import this file
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib.animation import FuncAnimation
@@ -49,7 +49,7 @@ class TrajectoryGenerator:
         """Convert continous state into grid indices"""
         if not (self.distance_range[0] <= distance <= self.distance_range[1] and
                 self.rel_speed_range[0] <= rel_speed <= self.rel_speed_range[1]):
-            print(f'{(distance,rel_speed)} is not in the area of interest.')
+            # print(f'{(distance,rel_speed)} is not in the area of interest.')
             return 0,0
         
         i = int((distance - self.distance_range[0])/self.distance_grid_size)
@@ -252,8 +252,8 @@ class TrajectoryGenerator:
         ax.set_xlabel("Distance (m)")
         ax.set_ylabel("Relative Speed (m/s)")
         ax.set_title("State-Space and Trajectories")
-        ax.set_xlim(self.distance_range)
-        ax.set_ylim(self.rel_speed_range)
+        # ax.set_xlim(self.distance_range)
+        # ax.set_ylim(self.rel_speed_range)
         ax.legend()
         
         def init():
@@ -311,6 +311,16 @@ class TrajectoryGenerator:
             predicted_x, predicted_y = zip(*[(state[0],state[1]) for state in predicted_state])
             predicted_state_line.set_data(predicted_x, predicted_y)
 
+            margin_x = 5
+            margin_y = 0.5
+            x_min = self.distance_range[0] if current_state[0] > self.distance_range[0] else current_state[0] - margin_x
+            y_min = self.rel_speed_range[0] if current_state[1] > self.rel_speed_range[0] else current_state[1] - margin_y
+            x_max = self.distance_range[1] if current_state[0] < self.distance_range[1] else current_state[0] + margin_x
+            y_max = self.rel_speed_range[1] if current_state[1] < self.rel_speed_range[1] else current_state[1] + margin_y
+
+            ax.set_xlim((x_min,x_max))
+            ax.set_ylim((y_min,y_max))
+
             # return random_trajectories + [best_trajectory_line, scatter_points, current_state_scatter] + list(rectangles.values())
             return random_trajectories + [best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
         
@@ -332,7 +342,9 @@ def vehicle_model(state: Tuple[float, float, float],
                  aggressive: float = 0.8,
                  h: float = 1.0,
                  delta_min: float = 5.0,
-                 T: float = 0.1) -> Tuple[float, float, float]:
+                 T: float = 0.1,
+                 deadtime: float = 0.1,
+                 tolerance: float = 1e-5) -> Tuple[float, float, float]:
     """
     Vehicle dynamics model calculating next state based on current state and control input.
 
@@ -343,13 +355,53 @@ def vehicle_model(state: Tuple[float, float, float],
         h: Time headway (s)
         delta_min: Minimum safe distance (meter)
         T: Time step (s)
+        deadtime: System delay (s)
 
     :return: Tuple of next state (next_distance, next_vp, next_vf)
     """
     d, vp, vf = state
+
+    # Initialize state history if not exists (for the beginning)
+    if not hasattr(vehicle_model,'state_history'):
+        vehicle_model.state_history = []
+        vehicle_model.time_history = []
+        vehicle_model.current_time = 0
+    
+    # Update current time
+    vehicle_model.current_time += T
+
+    # Store current state and time
+    vehicle_model.state_history.append(state)
+    vehicle_model.time_history.append(vehicle_model.current_time)
+    
+    # Remove old states beyond deadtime
+    while (vehicle_model.current_time - vehicle_model.time_history[0]) - deadtime > tolerance:
+        vehicle_model.state_history.pop(0)
+        vehicle_model.time_history.pop(0)
+    
+    # Get delayed state for ACC calculation
+    if len(vehicle_model.state_history) > 0:
+        delayed_d, delayed_vp, delayed_vf = vehicle_model.state_history[0]
+        # print(vehicle_model.current_time - vehicle_model.time_history[0])
+    else:
+        delayed_d, delayed_vp, delayed_vf = state
+    
     next_d = d + (vp-vf) * T
     next_vp = vp + control_input * T
-    next_vf = vf + (aggressive * d + vp - (1+aggressive*h)*vf - aggressive*delta_min)/h * T
+    
+     # Calculate following vehicle acceleration using delayed states
+    acc = (aggressive * delayed_d + delayed_vp - 
+           (1 + aggressive * h) * delayed_vf - 
+           aggressive * delta_min) / h
+    
+    # Add safety margin due to deadtime
+    safety_factor = 1.2  # Increase safety margin by 20%
+    if delayed_d < (delta_min * safety_factor):
+        acc = min(acc, -2)  # Stronger deceleration for safety
+    
+    # Update following vehicle velocity using calculated acceleration
+    next_vf = vf + acc * T
+
     return next_d, next_vp, next_vf
 
 
@@ -463,7 +515,7 @@ def main():
     if mode == 'optimize':
         save_path = get_unique_filepath('OptimizeBasedMPC','state_space_animation_opt','.gif')
     elif mode == 'sampling':
-        save_path = get_unique_filepath('SamplingBasedMPC','state_space_animation','.gif')
+        save_path = get_unique_filepath('SamplingBasedMPC_delayed','state_space_animation','.gif')
     
     state_space.plot_stat_space(max_steps,show = False, save_path=save_path)
 
