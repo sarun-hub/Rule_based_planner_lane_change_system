@@ -1,15 +1,16 @@
 from casadi import *
 from typing import Tuple, List, Callable, Dict
 import inspect
+from reference_generator import BaseGenerator
 from state_space_analysis import TrajectoryGenerator
-
+from spiral_reference_generator import SpiralReferenceGenerator
 
 class SamplingBasedMPC():
     def __init__(self, model: Callable[[Tuple[float,float,float],float, float, float, float, float], Tuple[float,float,float]],
                  cost_function: Callable[[Tuple[float, float],List[Tuple[float, float, float]]],List[float]],
                  N: int,
                  num_samples: int,
-                 state_space: TrajectoryGenerator):
+                 ref_generator: BaseGenerator):
         """
         :param
             model: vehicle model (including preceding and following vehicles [ACC])
@@ -21,13 +22,15 @@ class SamplingBasedMPC():
         self.cost_function = cost_function
         self.N = N
         self.num_samples = num_samples
-        self.state_space = state_space
+        self.ref_generator = ref_generator
+        self.max_acc = 3
+        self.min_acc = -3
 
     def generate_random_inputs(self):
         """
         Generate random input sequeences for N step 
         """
-        return [np.random.uniform(low = -3, high = 3, size = self.N) for _ in range(self.num_samples)]
+        return [np.random.uniform(low = self.min_acc, high = self.max_acc, size = self.N) for _ in range(self.num_samples)]
 
     def predict_states(self,initial_state: Tuple[float, float, float],
                          input_sequence: List[float])-> List[Tuple[float, float, float]]:
@@ -57,8 +60,18 @@ class SamplingBasedMPC():
         :return: List of cost (for all random inputs of num_samples)
         """
         costs = []
-        constraint_distance = (self.state_space.distance_range[0],self.state_space.distance_range[1])
-        target_list =self.state_space.find_best_trajectory(initial_state[0],(initial_state[1]-initial_state[2]))
+        constraint_distance = (self.ref_generator.distance_range[0],self.ref_generator.distance_range[1])
+
+        # check type of generator
+        if isinstance(self.ref_generator, TrajectoryGenerator) or self.check_instance(self.ref_generator,'TrajectoryGenerator'):
+            target_list =self.ref_generator.generate_reference(initial_state[0],(initial_state[1]-initial_state[2]))
+        elif isinstance(self.ref_generator, SpiralReferenceGenerator) or self.check_instance(self.ref_generator,'SpiralReferenceGenerator'):
+            target_list =self.ref_generator.generate_reference()
+        else:
+            print(type(self.ref_generator))
+            target_list = [0]*self.N
+            raise NotImplementedError(f"Reference generator of type {type(self.ref_generator).__name__} is not supported.")
+        
         for input_sequence in input_sequences:
             predicted_states = self.predict_states(initial_state, input_sequence)
             cost = self.cost_function(target_list,predicted_states, input_sequence)
@@ -90,18 +103,38 @@ class SamplingBasedMPC():
         input_sequences = self.generate_random_inputs()
         costs = self.compute_costs(initial_state, input_sequences)
         optimal_input_sequence, _ = self.select_optimal_input_sequence(input_sequences, costs)
+        # for Sprial Reference Generator -> move to the next point
+        if isinstance(self.ref_generator, SpiralReferenceGenerator) or self.check_instance(self.ref_generator,'SpiralReferenceGenerator'):
+            self.ref_generator.go_to_next_point()
         return optimal_input_sequence
+    
+    # For dealing with the instance type check
+    def check_instance(self, obj, obj_type:str):
+        return type(obj).__name__ == obj_type
+    
+'''
+Note: for isinstance()
+it will check the type of the variable
+There are two groups of type (in this context),
+1. class declared in the file that check type (type(obj)) -> __main__.class_name
+2. class imported from other file (fileA) -> fileA.class_name
+so when we check instance using isinstance(obj,obj_name) [in some cases]
+obj_name comes from group 2
+obj comes from group 1
+making it return "False" even though it's the same class.
+Thus, we need to use check_instance to resolve this problem (check by class name instead).
+'''
     
 
 class OptimizationBasedMPC():
     def __init__(self, model: Callable[[Tuple[float,float,float],float, float, float, float, float], Tuple[float,float,float]],
                  cost_function: Callable[[Tuple[float, float],List[Tuple[float, float, float]]],List[float]],
                  N: int,
-                 state_space: TrajectoryGenerator):
+                 ref_generator: BaseGenerator):
         self.model = model
         self.cost_function = cost_function
         self.N = N
-        self.state_space = state_space
+        self.ref_generator = ref_generator
 
         self.distance_weight = 1
         self.rel_speed_weight = 1
@@ -179,7 +212,14 @@ class OptimizationBasedMPC():
         self.solver = nlpsol('solver', 'ipopt', nlp_prob, opts)
 
     def set_objective_function(self, current_state: Tuple[float,float,float]) :
-        target_list =self.state_space.find_best_trajectory(current_state[0],(current_state[1]-current_state[2]))
+        if isinstance(self.ref_generator, TrajectoryGenerator) or self.check_instance(self.ref_generator,'TrajectoryGenerator'):
+            target_list =self.ref_generator.generate_reference(current_state[0],(current_state[1]-current_state[2]))
+        elif isinstance(self.ref_generator, SpiralReferenceGenerator) or self.check_instance(self.ref_generator,'SpiralReferenceGenerator'):
+            target_list =self.ref_generator.generate_reference()
+            self.ref_generator.go_to_next_point()
+        else:
+            target_list = [0]*self.N
+            raise NotImplementedError(f"Reference generator of type {type(self.ref_generator).__name__} is not supported.")
 
         # Objective function
         obj = 0
@@ -270,3 +310,7 @@ class OptimizationBasedMPC():
         sol = self.solver(x0=arg["x0"], lbx=arg["lbx"], ubx=arg["ubx"], lbg=arg["lbg"], ubg=arg["ubg"], p=arg["p"])
         u = reshape(sol['x'].T, self.n_controls, self.N)
         return u.full().flatten().tolist()    
+    
+    # For dealing with the instance type check
+    def check_instance(self, obj, obj_type:str):
+        return type(obj).__name__ == obj_type
