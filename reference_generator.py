@@ -98,7 +98,7 @@ class BaseGenerator():
             random_trajectories = [ax.plot([],[], color = 'blue', alpha = 0.3, linestyle='--', linewidth =0.5)[0] for _ in range(self.num_samples)]
             label_best_traj = 'Best Target Trajectory'
         elif self.check_instance(self,"SpiralReferenceGenerator"):
-            random_trajectories = []
+            random_trajectories, = ax.plot([], [], color='blue', alpha = 0.3, linestyle='--', linewidth =0.5, label="Expected Spiral Trajectory")
             label_best_traj = 'Target Trajectory'
         else :
             random_trajectories = []
@@ -130,15 +130,29 @@ class BaseGenerator():
                 rect.set_alpha(1.0)
             
             # Reset scatter points and line (for loop start)
-            for traj_line in random_trajectories:
-                traj_line.set_data([],[])
+            if self.check_instance(self,"TrajectoryGenerator"):
+                for traj_line in random_trajectories:
+                    traj_line.set_data([],[])
+            elif self.check_instance(self,"SpiralReferenceGenerator"):
+                # Draw All the spiral 
+                spiral_x, spiral_y = zip(*[(state[0],state[1]) for state in self.all_trajectories])
+                random_trajectories.set_data(spiral_x,spiral_y)
+            else :
+                raise NotImplementedError('Generator {type(self).__name__} is not yet supported.')
+
             best_trajectory_line.set_data([],[])
             predicted_state_line.set_data([],[])
             current_state_scatter.set_offsets(np.empty((0,2)))
             previous_state_scatter.set_offsets(np.empty((0,2)))
 
+            if self.check_instance(self,"TrajectoryGenerator"):
             # No need to return prediced_state_line since blit = False (it explicitly update)
-            return random_trajectories + [best_trajectory_line, current_state_scatter, previous_state_scatter] + list(rectangles.values())
+                return random_trajectories + [best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
+            elif self.check_instance(self,"SpiralReferenceGenerator"):
+                # No updated
+                return [random_trajectories, best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
+            else:
+                raise NotImplementedError(f'Generator {type(self).__name__} is not yet supported.')
 
         def update(step):
             """Update animation at each step"""
@@ -161,11 +175,17 @@ class BaseGenerator():
 
             previous_state_scatter.set_offsets(previous_state)
 
-            # Update random trajectories (if any) -> exists in TrajectoryGenerator but not in SprialReferenceGenerator
-            trajectories = self.all_trajectories[step]
-            for traj_line, trajectory in zip(random_trajectories, trajectories):
-                x, y = zip(*[(state[0],state[1]) for state in trajectory])
-                traj_line.set_data(x,y)
+            # Update random trajectories (if any) -> exists in TrajectoryGenerator but not in SpiralReferenceGenerator
+            if self.check_instance(self,"TrajectoryGenerator"):
+                trajectories = self.all_trajectories[step]
+                for traj_line, trajectory in zip(random_trajectories, trajectories):
+                    x, y = zip(*[(state[0],state[1]) for state in trajectory])
+                    traj_line.set_data(x,y)
+            elif self.check_instance(self,"SpiralReferenceGenerator"):
+                # No updated
+                pass
+            else:
+                raise NotImplementedError(f'Generator {type(self).__name__} is not yet supported.')
             
             # Update the best trajectory (in both TrajectoryGenerator and SpiralReferenceGenerator)
             best_trajectory = self.all_best_trajectories[step]
@@ -188,7 +208,13 @@ class BaseGenerator():
             ax.set_xlim((x_min,x_max))
             ax.set_ylim((y_min,y_max))
 
-            return random_trajectories + [best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
+            if self.check_instance(self,"TrajectoryGenerator"):
+                return random_trajectories + [best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
+            elif self.check_instance(self,"SpiralReferenceGenerator"):
+                # No updated
+                return [random_trajectories, best_trajectory_line,  current_state_scatter, previous_state_scatter] + list(rectangles.values())
+            else:
+                raise NotImplementedError(f'Generator {type(self).__name__} is not yet supported.')
 
         # Animate
         anim = FuncAnimation(fig, update, frames=max_steps, init_func = init, interval = 500, blit = False, repeat = True)
