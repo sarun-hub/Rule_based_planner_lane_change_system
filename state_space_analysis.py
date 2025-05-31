@@ -2,10 +2,8 @@ import numpy as np
 from typing import Tuple, List 
 import os
 # from MPC_utils import SamplingBasedMPC, OptimizationBasedMPC      # Cannot import here since MPC_utils also import this file
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-from matplotlib.animation import FuncAnimation
 from reference_generator import BaseGenerator       # for base reference_generator
+from utils import get_unique_filepath
 
 # ======================================== Target Trajectory Generator ==================================#
 
@@ -259,6 +257,31 @@ def vehicle_model(state: Tuple[float, float, float],
 
     return next_d, next_vp, next_vf
 
+def vehicle_model_without_delay(state: Tuple[float, float, float], 
+                 control_input: float,
+                 aggressive: float = 0.8,
+                 h: float = 1.0,
+                 delta_min: float = 5.0,
+                 T: float = 0.1) -> Tuple[float, float, float]:
+    """
+    Vehicle dynamics model calculating next state based on current state and control input.
+
+    :param
+        state: Tuple of (distance, preceding vehicle velocity, following vehicle velocity)
+        control_input: Acceleration input for the preceding vehicle
+        aggressive: Aggressiveness factor
+        h: Time headway (s)
+        delta_min: Minimum safe distance (meter)
+        T: Time step (s)
+        deadtime: System delay (s)
+
+    :return: Tuple of next state (next_distance, next_vp, next_vf)
+    """
+    d, vp, vf = state
+    next_d = d + (vp-vf) * T
+    next_vp = vp + control_input * T
+    next_vf = vf + (aggressive * d + vp - (1+aggressive*h)*vf - aggressive*delta_min)/h * T
+    return next_d, next_vp, next_vf
 
 
 def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tuple[float, float, float]], input_sequence: List[float]):
@@ -286,31 +309,6 @@ def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tupl
 
     return cost
 
-# ========================================== Helper Function =========================================#
-
-def get_unique_filepath(base_dir: str, base_filename: str, extension: str) -> str:
-    """
-    Generate a unique file path by appending a number if the file already exists.
-
-    :param base_dir: Directory where the file will be saved.
-    :param base_filename: Base name of the file (without number or extension).
-    :param extension: File extension (e.g., '.gif').
-    :return: Unique file path.
-    """
-    if not os.path.exists(base_dir):
-        os.makedirs(base_dir)  # Create the directory if it doesn't exist
-
-    # Construct initial file path
-    counter = 1
-    filepath = os.path.join(base_dir, f"{base_filename}_{counter}{extension}")
-    
-    # Increment counter until a unique file path is found
-    while os.path.exists(filepath):
-        counter += 1
-        filepath = os.path.join(base_dir, f"{base_filename}_{counter}{extension}")
-    
-    return filepath
-
 # Set Global weight
 distance_weight = 1
 rel_speed_weight = 1
@@ -327,11 +325,11 @@ def main():
     num_samples = 20
     N = 20
 
-    state_space = TrajectoryGenerator(distance_range,rel_speed_range,grid_resolution,num_samples,N,derivative = False)
+    traj_generator = TrajectoryGenerator(distance_range,rel_speed_range,grid_resolution,num_samples,N,derivative = False)
 
     # Initialize mpc
-    sampling_mpc = SamplingBasedMPC(vehicle_model,cost_function, N, num_samples, state_space)
-    optimize_mpc = OptimizationBasedMPC(vehicle_model,cost_function,N,state_space)
+    sampling_mpc = SamplingBasedMPC(vehicle_model,cost_function, N, num_samples, traj_generator)
+    optimize_mpc = OptimizationBasedMPC(vehicle_model,cost_function,N,traj_generator)
 
     # Set objective function weight
     optimize_mpc.distance_weight = distance_weight
@@ -345,14 +343,14 @@ def main():
     max_steps = 100
 
     # ================ SET MODE =================
-    mode = 'sampling'
+    mode = 'optimize'
 
     optimal_input_sequence = np.zeros(N)
     mpc = sampling_mpc if mode == 'sampling' else optimize_mpc
     # Generate and evaluate trajectories
     for step in range(max_steps):
         # TODO: Can be put in mpc.solve (TBD)
-        state_space.marked_visited(state[0],state[1]-state[2])
+        traj_generator.marked_visited(state[0],state[1]-state[2])
         if mode == 'optimize':
             optimal_input_sequence = mpc.solve(state,optimal_input_sequence)
         elif mode == 'sampling':
@@ -365,7 +363,7 @@ def main():
         predicted_state = mpc.predict_states(state,optimal_input_sequence)
         predicted_state = [(state_[0],state_[1]-state_[2]) for state_ in predicted_state]
 
-        state_space.add_predicted_state(predicted_state)
+        traj_generator.add_predicted_state(predicted_state)
         state = vehicle_model(state,optimal_input)
 
 
@@ -376,7 +374,7 @@ def main():
         save_path = get_unique_filepath('SamplingBasedMPC_delayed','state_space_animation','.gif')
     
     save_path = ''
-    state_space.plot_state_space(max_steps,show = True, save_path=save_path)
+    traj_generator.plot_state_space(max_steps,show = True, save_path=save_path)
 
 if __name__ == '__main__':
     main()
