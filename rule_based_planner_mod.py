@@ -120,7 +120,7 @@ def vehicle_model(state: Tuple[float, float, float],
 
     return next_d, next_vp, next_vf
 
-# Define cost fin
+# Define cost func
 def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tuple[float, float, float]], input_sequence: List[float]):
     """
     Calculate Cost from the predicted states (state cost) and input sequence (input cost)
