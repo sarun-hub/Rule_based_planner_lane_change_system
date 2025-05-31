@@ -2,6 +2,7 @@ import numpy as np
 from typing import Tuple, List
 from reference_generator import BaseGenerator
 from utils import get_unique_filepath
+import warnings
 
 # Temporary set
 T = 0.1     # will be in vehicle model
@@ -15,7 +16,7 @@ class SpiralReferenceGenerator(BaseGenerator):
                  rel_speed_range: Tuple[float,float],
                  grid_resolution: Tuple[float,float],
                  N: int = 20,
-                 expanding_rate: float = 0.1):
+                 max_steps : int = 300):
         """
         Requires:
         initial_state: the initial state (don't know what to use)
@@ -25,12 +26,11 @@ class SpiralReferenceGenerator(BaseGenerator):
         # Initialize parameter
         self.initial_state = initial_state
         super().__init__(distance_range, rel_speed_range, grid_resolution, N)
-        self.expanding_rate = expanding_rate
         self.count = 0
 
         # set the center of the spiral (a_target)
         self.center = self.calculate_center()
-        self.create_spiral()
+        self.create_spiral(max_steps)
 
     # for calculating the range of vary b_target (TODO + set default T)
     def set_range(self):
@@ -42,21 +42,33 @@ class SpiralReferenceGenerator(BaseGenerator):
         center = (max_x-min_x)/2
         return center
     
-    def create_spiral(self):
-        max_steps = 100
+    def create_spiral(self,max_steps):
         # Set period and angular velocity 
         period = 100
         w = 2 * np.pi / period
-        # Set range
+        # TODO: Make the number of round customizable
+        number_of_rounds = 3
+
         b_target_range = (5,40)
-        b_target_list = np.linspace(b_target_range[0],b_target_range[1],int((b_target_range[1]-b_target_range[0])/self.expanding_rate))
+        # Calculate expanding rate
+        expanding_rate =  (b_target_range[1]-b_target_range[0]) / (max_steps)
+        # Set range
+        # b_target_list = np.linspace(b_target_range[0],b_target_range[1],int((b_target_range[1]-b_target_range[0])/self.expanding_rate))
 
         spiral_trajectory = []
-        for i in range(len(b_target_list)):
-            target_d = self.center + b_target_list[i] * np.sin(w*i*T)
-            target_v_rel = b_target_list[i]*w*np.cos(w*i*T)
+        for i in range(max_steps):
+            # Compute the expansion factor
+            b_target = b_target_range[0] + expanding_rate * (i)
+            # b_target = 5
+
+            target_d = self.center + b_target * np.sin(w*i*T)
+            target_v_rel = b_target*w*np.cos(w*i*T)
+            if i == 0:
+                print(target_d,target_v_rel)
             spiral_trajectory.append((target_d,target_v_rel))
         self.spiral_trajectory = spiral_trajectory
+        # Add all spiral reference into self.all_trajectories
+        self.all_trajectories = spiral_trajectory
 
     def go_to_next_point(self):
         self.count += 1
@@ -65,8 +77,10 @@ class SpiralReferenceGenerator(BaseGenerator):
     def generate_reference(self):
         remaining = len(self.spiral_trajectory) - self.count
         if remaining >= self.N:
+            self.all_best_trajectories.append(self.spiral_trajectory[self.count:self.count+self.N])
             return self.spiral_trajectory[self.count:self.count+self.N]
         else:# if it does not have enough b_target for future, repeat the last value
+            self.all_best_trajectories.append(self.spiral_trajectory[self.count:] + [self.spiral_trajectory[-1]] * (self.N - remaining))
             return self.spiral_trajectory[self.count:] + [self.spiral_trajectory[-1]] * (self.N - remaining)
         
 # ===================================== Vehicle Model ===========================================#
@@ -138,7 +152,31 @@ def vehicle_model(state: Tuple[float, float, float],
 
     return next_d, next_vp, next_vf
 
+def vehicle_model_without_delay(state: Tuple[float, float, float], 
+                 control_input: float,
+                 aggressive: float = 0.8,
+                 h: float = 1.0,
+                 delta_min: float = 5.0,
+                 T: float = 0.1) -> Tuple[float, float, float]:
+    """
+    Vehicle dynamics model calculating next state based on current state and control input.
 
+    :param
+        state: Tuple of (distance, preceding vehicle velocity, following vehicle velocity)
+        control_input: Acceleration input for the preceding vehicle
+        aggressive: Aggressiveness factor
+        h: Time headway (s)
+        delta_min: Minimum safe distance (meter)
+        T: Time step (s)
+        deadtime: System delay (s)
+
+    :return: Tuple of next state (next_distance, next_vp, next_vf)
+    """
+    d, vp, vf = state
+    next_d = d + (vp-vf) * T
+    next_vp = vp + control_input * T
+    next_vf = vf + (aggressive * d + vp - (1+aggressive*h)*vf - aggressive*delta_min)/h * T
+    return next_d, next_vp, next_vf
 
 def cost_function(targets: List[Tuple[float, float]],predicted_states: List[Tuple[float, float, float]], input_sequence: List[float]):
     """
@@ -178,24 +216,30 @@ def main():
     distance_range = (5,50)         # Distance range in meters
     rel_speed_range = (-5,5)        # Relative speed range in m/s
     grid_resolution = (10, 10)      # Grid Resolution
-    expanding_rate = 1              # Expanding rate of the spiral
     N = 20
+    max_steps = 2000
+
 
     # Define initial state
-    initial_state = (12, 3, 0)  # Distance, preceding vehicle speed, following vehicle speed
+    # initial_state = (12, 3, 0)  # Distance, preceding vehicle speed, following vehicle speed
+    initial_state = (22.5, 0, 0)  # Distance, preceding vehicle speed, following vehicle speed
 
-    spiral_generator = SpiralReferenceGenerator(initial_state,distance_range,rel_speed_range,grid_resolution,N,expanding_rate)
+    spiral_generator = SpiralReferenceGenerator(initial_state,distance_range,rel_speed_range,grid_resolution,N,max_steps)
 
     # Initialize MPC
     num_samples = 20
-    sampling_mpc = SamplingBasedMPC(vehicle_model, cost_function,N,num_samples,spiral_generator)
-    optimize_mpc = OptimizationBasedMPC(vehicle_model,cost_function,N,spiral_generator)
+    delay = False
+    if delay:
+        sampling_mpc = SamplingBasedMPC(vehicle_model, cost_function,N,num_samples,spiral_generator)
+        optimize_mpc = OptimizationBasedMPC(vehicle_model,cost_function,N,spiral_generator)
+    else :
+        sampling_mpc = SamplingBasedMPC(vehicle_model_without_delay, cost_function,N,num_samples,spiral_generator)
+        optimize_mpc = OptimizationBasedMPC(vehicle_model_without_delay,cost_function,N,spiral_generator)
     
     state = initial_state
-    max_steps = 100
 
     # ================= SET MODE ======================= #
-    mode = 'sampling'
+    mode = 'optimize'
 
     optimal_input_sequence = np.zeros(N)
     mpc = sampling_mpc if mode == 'sampling' else optimize_mpc
@@ -215,16 +259,20 @@ def main():
         predicted_state = [(state_[0],state_[1]-state_[2]) for state_ in predicted_state]
 
         spiral_generator.add_predicted_state(predicted_state)
-        state = vehicle_model(state,optimal_input)
+        state = vehicle_model(state,optimal_input) if delay else vehicle_model_without_delay(state,optimal_input)
     
     # Visualize state-space and trajectory
-    if mode == 'opitmize':
-        save_path = get_unique_filepath('Spiral_OptimizedBasedMPC','state_space_animation_opt','.gif')
+    if mode == 'optimize':
+        save_path = get_unique_filepath('Spiral_OptimizedBasedMPC','state_space_animation_opt_3_round','.gif')
     elif mode == 'sampling':
         save_path = get_unique_filepath('Spiral_SamplingBasedMPC','state_space_animation','.gif')
-    
-    save_path = ''
-    spiral_generator.plot_state_space(max_steps,show=True,save_path=save_path)
+    else :
+        save_path = ''
+        warnings.warn(f"Mode {mode} doesn't exits. \n Don't save the file.")
+        show = True
+    show = False
+    # save_path = ''
+    spiral_generator.plot_state_space(max_steps,show=show,save_path=save_path)
 
 if __name__ == '__main__':
     main()
