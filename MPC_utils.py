@@ -4,6 +4,7 @@ import inspect
 from reference_generator import BaseGenerator
 from state_space_analysis import TrajectoryGenerator
 from spiral_reference_generator import SpiralReferenceGenerator
+from MPC_config import distance_constraint
 
 class SamplingBasedMPC():
     def __init__(self, model: Callable[[Tuple[float,float,float],float, float, float, float, float], Tuple[float,float,float]],
@@ -68,7 +69,6 @@ class SamplingBasedMPC():
         elif isinstance(self.ref_generator, SpiralReferenceGenerator) or self.check_instance(self.ref_generator,'SpiralReferenceGenerator'):
             target_list =self.ref_generator.generate_reference()
         else:
-            print(type(self.ref_generator))
             target_list = [0]*self.N
             raise NotImplementedError(f"Reference generator of type {type(self.ref_generator).__name__} is not supported.")
         
@@ -314,3 +314,99 @@ class OptimizationBasedMPC():
     # For dealing with the instance type check
     def check_instance(self, obj, obj_type:str):
         return type(obj).__name__ == obj_type
+    
+# This simple sampling based MPC is used for only one time calculation for tracking from initial state to target state
+class SimpleSamplingBasedMPC():
+    def __init__(self, model: Callable[[Tuple[float,float,float],float, float, float, float, float], Tuple[float,float,float]],
+                 cost_function: Callable[[Tuple[float, float],List[Tuple[float, float, float]]],List[float]],
+                 N: int,
+                 num_samples: int):
+        """
+        :param
+            model: vehicle model (including preceding and following vehicles [ACC])
+            cost_fucntion: cost function that is used to evaluate the sample
+            N: prediction horizon
+            num_samples: number of samples that will be generated
+        """
+        self.model = model
+        self.cost_function = cost_function
+        self.N = N
+        self.num_samples = num_samples
+        self.max_acc = 3
+        self.min_acc = -3
+
+    # Set target
+    def set_target(self, target):
+        self.target = target
+
+    def generate_random_inputs(self):
+        """
+        Generate random input sequences (num_samples sequences) for N step 
+        """
+        return [np.random.uniform(low = self.min_acc, high = self.max_acc, size = self.N) for _ in range(self.num_samples)]
+    
+    def predict_states(self,initial_state: Tuple[float, float, float],
+                         input_sequence: List[float])-> List[Tuple[float, float, float]]:
+        """
+        Generate states (for N steps) from input sequences (acceleration)
+
+        :param
+            initial_state: initial state [current state] (distance, preceding speed, following speed)
+            input_sequence: list of input (acceleration)
+        :return: List of state (predicted states for N steps)
+        """
+        states = [initial_state]
+        state = initial_state
+        for u in input_sequence:
+            state = self.model(state, u)
+            states.append(state)
+        return states
+    
+    def compute_costs(self, initial_state: Tuple[float, float, float],
+                      input_sequences: List[List[float]]) -> List[float]:
+        """
+        Compute costs of all random input sequences
+
+        :param
+            initial_state: initial state [current state] (distance, preceding speed, following speed)
+            input_sequences: list of all random input sequences (acceleration) 
+        :return: List of cost (for all random inputs of num_samples)
+        """
+        costs = []
+        constraint_distance = distance_constraint
+
+        target = self.target
+        
+        for input_sequence in input_sequences:
+            predicted_states = self.predict_states(initial_state, input_sequence)
+            cost = self.cost_function(target,predicted_states, input_sequence)
+            if not all(constraint_distance[0]<=state[0]<=constraint_distance[0] for state in predicted_states):
+                cost = cost + 1e6
+
+            costs.append(cost)
+        return costs
+    
+    def select_optimal_input_sequence(self, input_sequences: List[List[float]],
+                                      costs: List[float]) -> Tuple[List[float], float]:
+        """
+        Select the minimum cost input sequence
+
+        :param
+            input_sequences: list of all random input sequences
+            costs: list of cost of all random input sequences
+        :return: input sequence with the least cost and that cost
+        """
+        min_cost_index = np.argmin(costs)
+        return input_sequences[min_cost_index], costs[min_cost_index]
+        
+    def solve(self, initial_state: Tuple[float, float, float]) -> List[float]:
+        """
+        Aggrregate all functions to run at once
+        :param initial_state: initial state [current state] (distance, preceding speed, following speed)
+        :return: optimal input sequence
+        """
+        input_sequences = self.generate_random_inputs()
+        costs = self.compute_costs(initial_state, input_sequences)
+        optimal_input_sequence, _ = self.select_optimal_input_sequence(input_sequences, costs)
+    
+        return optimal_input_sequence
