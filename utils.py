@@ -128,7 +128,7 @@ def new_vehicle_model(state: Tuple[float,float,float],
                       control_input: float,
                       aggressive: float = 0.8,
                       h: float = 1.0,
-                      T: float = 1.0):
+                      T: float = 0.1):
     """
     Vehicle dynamics model calculating next state based on current state and control input
     Without considering delta min (but will include in constraint) (add following velocity constraint manually)
@@ -149,11 +149,47 @@ def new_vehicle_model(state: Tuple[float,float,float],
     next_vp = vp + control_input * T 
     delta_min = 5.0
 
-    following_acc = max(min_following_acc, min(max_following_acc, (aggressive * d + vp - (1+aggressive*h) * vf - aggressive * delta_min)/h))
+    following_acc = max(min_following_acc, min(max_following_acc, (aggressive * d + vp - (1+aggressive*h) * vf )/h))
+    # following_acc = max(min_following_acc, min(max_following_acc, (aggressive * d + vp - (1+aggressive*h) * vf - aggressive * delta_min)/h))
+
     next_vf = vf + following_acc * T
 
     
     return next_d, next_vp, next_vf
+
+
+def new_vehicle_model_for_logging(state: Tuple[float,float,float],
+                      control_input: float,
+                      aggressive: float = 0.8,
+                      h: float = 1.0,
+                      T: float = 0.1):
+    """
+    Vehicle dynamics model calculating next state based on current state and control input
+    Without considering delta min (but will include in constraint) (add following velocity constraint manually)
+
+    :param
+        state: Tuple of (distance, preceding vehicle velocity, following vehicle velocity)
+        control_input: Acceleration input for the preceding vehicle
+        aggressive: Aggressiveness factor
+        h: Time headway (s)
+        T: Time step (s)
+    :return: Tuple for next state (next_distance, next_vp, next_vf)
+    """
+    min_following_acc = -3
+    max_following_acc = 3
+
+    d, vp, vf = state
+    next_d = d + (vp-vf) * T
+    next_vp = vp + control_input * T 
+    delta_min = 5.0
+
+    following_acc = max(min_following_acc, min(max_following_acc, (aggressive * d + vp - (1+aggressive*h) * vf)/h))
+    # following_acc = max(min_following_acc, min(max_following_acc, (aggressive * d + vp - (1+aggressive*h) * vf - aggressive * delta_min)/h))
+    next_vf = vf + following_acc * T
+
+    
+    return next_d, next_vp, next_vf, following_acc
+
 
 # ======================================== cost function =============================================#
 

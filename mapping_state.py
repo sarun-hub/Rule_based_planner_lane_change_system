@@ -2,7 +2,7 @@
 import warnings
 from MPC_utils import SamplingBasedMPC, OptimizationBasedMPC, SimpleSamplingBasedMPC
 from MPC_config import *
-from utils import vehicle_model_without_delay, cost_function1, get_unique_filepath, new_vehicle_model, following_acc_history
+from utils import vehicle_model_without_delay, cost_function1, get_unique_filepath, new_vehicle_model, new_vehicle_model_for_logging
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import pandas as pd
@@ -56,10 +56,11 @@ if __name__ == '__main__':
     # save_dir = 'Z_state/simple_sampling_based'
     # save_dir = 'Z_state/without_delta_min'
     # save_dir = 'Z_state/no_delta_min_all_accel_limited'
-    save_dir = 'Z_state/500_samples_no_delta_acc_limited'
+    # save_dir = 'Z_state/500_samples_no_delta_acc_limited'
+    save_dir = 'Z_state/compared_500_samples_acc_limited'
     # anim_name = '_state_space_animation'
     # anim_name = '_state_space_animation_acc_limited'
-    anim_name = '_500_samples_no_delta_acc_limited'
+    anim_name = '_500_samples_acc_limited_without_delta_min'
 
     # Initiate state-space and MPC
     distance_range = (5,50)     # Distance range in meters
@@ -83,6 +84,7 @@ if __name__ == '__main__':
 
 
     preceding_acc_history = []
+    following_acc_history = []
 
     path = [intitial_state]
     max_step = 500
@@ -91,15 +93,25 @@ if __name__ == '__main__':
 
         optimal_input = optimal_input_sequence[0]
         preceding_acc_history.append(optimal_input)
-        state = model(state,optimal_input)
+        d,vp,vf, optimal_following_acc  = new_vehicle_model_for_logging(state,optimal_input)
+        # d,vp,vf  = new_vehicle_model(state,optimal_input)
+        # d,vp,vf  = vehicle_model_without_delay(state,optimal_input)
+        following_acc_history.append(optimal_following_acc)
+        state = (d,vp,vf)
         path.append(state)
 
     # print(state)
     # print(state_distance(state,target))
 
+    df = pd.DataFrame({
+        'preceding_acceleration': preceding_acc_history,
+        'following_acceleration': following_acc_history
+    })
     
+    csv_name = get_unique_filepath(save_dir,f'without_delta_min','.csv')
+    df.to_csv(csv_name,index=False)
 
-    plot = False
+    plot = True
     if plot:
     # ====================================== Plot Animation =============================================#
         path_z = [real_to_z(s) for s in path]
