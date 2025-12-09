@@ -23,6 +23,18 @@ def real_to_z(state, h = 1):
         warnings.warn(f'State {state} is not on controllable plane. Use d as z1!')
     return (z1,z2)
 
+# function to convert from (d, vp, vf) to (z1, z2) using pseudo inverse
+def real_to_z_inverse(state,h=1):
+    # z1_T = [1 0 1/h]
+    # z2_T = [0 1 0]
+    Im = np.array([[1,0],
+               [0,1],
+               [1/h,0]])
+    Im_pinv = np.linalg.pinv(Im)
+    state_array = np.array(state)
+    actual_state = np.matmul(Im_pinv, state_array)
+    return actual_state
+
 # function to convert from (z1, z2) to (d, vp, vf)
 def z_to_real(z, h = 1):
     d = z[0]
@@ -51,16 +63,19 @@ if __name__ == '__main__':
     # want target point to be (20, 23, 20) -> 2
     # target_z = (20,23)  
     # want target point to be (12,7,12) -> 3 
-    target_z = (12,7)  
+    # target_z = (12,7)  
+    # want target point to be (18,8,18) -> 4
+    target_z = (18,8)  
 
     # save_dir = 'Z_state/simple_sampling_based'
     # save_dir = 'Z_state/without_delta_min'
     # save_dir = 'Z_state/no_delta_min_all_accel_limited'
     # save_dir = 'Z_state/500_samples_no_delta_acc_limited'
-    save_dir = 'Z_state/compared_500_samples_acc_limited'
+    # save_dir = 'Z_state/compared_500_samples_acc_limited'
+    save_dir = 'Z_state/inverse_conversion_500_samples_acc_limited'
     # anim_name = '_state_space_animation'
     # anim_name = '_state_space_animation_acc_limited'
-    anim_name = '_500_samples_acc_limited_without_delta_min'
+    anim_name = '_inverse_conversion_500_samples_acc_limited_with_delta_min'
 
     # Initiate state-space and MPC
     distance_range = (5,50)     # Distance range in meters
@@ -75,8 +90,8 @@ if __name__ == '__main__':
     target_rel = (target[0],target[1]-target[2])
 
 
-    # model = vehicle_model_without_delay
-    model = new_vehicle_model
+    model = vehicle_model_without_delay
+    # model = new_vehicle_model
     state = intitial_state
     # Initialize mpc
     mpc = SimpleSamplingBasedMPC(model,cost_function1, N, num_samples)
@@ -93,28 +108,31 @@ if __name__ == '__main__':
 
         optimal_input = optimal_input_sequence[0]
         preceding_acc_history.append(optimal_input)
-        d,vp,vf, optimal_following_acc  = new_vehicle_model_for_logging(state,optimal_input)
+        # d,vp,vf, optimal_following_acc  = new_vehicle_model_for_logging(state,optimal_input)
         # d,vp,vf  = new_vehicle_model(state,optimal_input)
-        # d,vp,vf  = vehicle_model_without_delay(state,optimal_input)
-        following_acc_history.append(optimal_following_acc)
+        d,vp,vf  = vehicle_model_without_delay(state,optimal_input)
+        # following_acc_history.append(optimal_following_acc)
         state = (d,vp,vf)
         path.append(state)
 
     # print(state)
     # print(state_distance(state,target))
 
-    df = pd.DataFrame({
-        'preceding_acceleration': preceding_acc_history,
-        'following_acceleration': following_acc_history
-    })
+    # df = pd.DataFrame({
+    #     'preceding_acceleration': preceding_acc_history,
+    #     'following_acceleration': following_acc_history
+    # })
     
-    csv_name = get_unique_filepath(save_dir,f'without_delta_min','.csv')
-    df.to_csv(csv_name,index=False)
+    # csv_name = get_unique_filepath(save_dir,f'without_delta_min','.csv')
+    # df.to_csv(csv_name,index=False)
+    # path_z = [real_to_z_inverse(s) for s in path]
+
 
     plot = True
     if plot:
     # ====================================== Plot Animation =============================================#
-        path_z = [real_to_z(s) for s in path]
+        # path_z = [real_to_z(s) for s in path]
+        path_z = [real_to_z_inverse(s) for s in path]
 
         pov_choices = ['z','actual']
         pov = pov_choices[1]
