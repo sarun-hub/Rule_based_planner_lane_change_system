@@ -410,3 +410,69 @@ class SimpleSamplingBasedMPC():
         optimal_input_sequence, _ = self.select_optimal_input_sequence(input_sequences, costs)
     
         return optimal_input_sequence
+    
+# Need specific model
+class ZStateSamplingBasedMPC():
+    def __init__(self, model,
+                 cost_function,
+                 N: int,
+                 num_samples: int):
+        self.model = model
+        self.cost_function = cost_function
+        self.N = N
+        self.num_samples = num_samples
+        # preceding acceleration (z2 = vp)
+        self.max_acc = 3
+        self.min_acc = -3
+    
+    # Set target in (z1, z2)
+    def set_target(self, target):
+        self.target = target
+
+    def generate_random_inputs(self):
+        """
+        Generate random input sequences (num_samples sequences) for N step 
+        """
+        return [np.random.uniform(low = self.min_acc, high = self.max_acc, size = self.N) for _ in range(self.num_samples)]
+    
+    def predict_states(self,initial_state: Tuple[float, float],
+                         input_sequence: List[float])-> List[Tuple[float, float]]:
+        """
+        Generate states (for N steps) from input sequences (acceleration)
+
+        :param
+            initial_state: initial state [current state] (z1 and z2)
+            input_sequence: list of input (acceleration)
+        :return: List of state (predicted states for N steps)
+        """
+        states = [initial_state]
+        state = initial_state
+        for u in input_sequence:
+            state = self.model(state, u)
+            states.append(state)
+        return states
+    
+    def compute_costs(self, initial_state: Tuple[float, float],
+                      input_sequences: List[List[float]]) -> List[float]:
+        """
+        Compute costs of all random input sequences
+
+        :param
+            initial_state: initial state [current state] (z1, z2)
+            input_sequences: list of all random input sequences (acceleration) 
+        :return: List of cost (for all random inputs of num_samples)
+        """
+        costs = []
+        # since z1 = d 
+        constraint_distance = distance_constraint
+
+        target = self.target
+        
+        for input_sequence in input_sequences:
+            predicted_states = self.predict_states(initial_state, input_sequence)
+            cost = self.cost_function(target,predicted_states, input_sequence)
+            if not all(constraint_distance[0]<=state[0]<=constraint_distance[0] for state in predicted_states):
+                cost = cost + 1e6
+
+            costs.append(cost)
+        return costs
