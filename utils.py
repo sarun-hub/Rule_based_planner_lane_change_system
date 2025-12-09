@@ -190,6 +190,19 @@ def new_vehicle_model_for_logging(state: Tuple[float,float,float],
     
     return next_d, next_vp, next_vf, following_acc
 
+def z_state_model(state,
+                  control_input: float,
+                  aggressive: float = 0.8,
+                  h: float = 1.0,
+                  T: float = 0.1):
+    min_following_acc = -3
+    max_following_acc = 3
+
+    z1, z2 = state
+    z1_acceleration = min(max_following_acc, max(min_following_acc, (z2-z1/h)))
+    next_z1 =  z1 + z1_acceleration * T
+    next_z2 = z2 + control_input * T
+    return next_z1, next_z2
 
 # ======================================== cost function =============================================#
 
@@ -247,4 +260,30 @@ def cost_function(
             diff_cont = input_sequence[k] - previous_cont
             cost = cost + diff_cont * R[0,0] * diff_cont
 
+    return cost
+
+# Cost function considering one target (for heading goal) for z-state: 
+def z_state_cost_function(target: Tuple[float,float],
+        predicted_states: List[Tuple[float, float]],
+        input_sequence: List[float]):
+    cost = 0
+    Q = Q_weight
+    R = R_weight
+
+    target_z1, target_z2 = target
+
+    # find cost for state difference
+    for state in predicted_states:
+        z1, z2= state
+        z1_diff = z1 - target_z1
+        z2_diff = z2 - target_z2
+        cost = cost + z1_diff * Q[0,0] * z1_diff + z2_diff * Q[1,1] * z2_diff
+
+    # find cost for input  
+    for k in range(len(input_sequence)):
+        if k > 0:
+            previous_cont = input_sequence[k-1]
+            diff_cont = input_sequence[k] - previous_cont
+            cost = cost + diff_cont * R[0,0] * diff_cont
+    
     return cost
