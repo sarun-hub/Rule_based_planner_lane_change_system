@@ -1,0 +1,6 @@
+numpy
+matplotlib
+pygame
+pandas
+casadi
+control
