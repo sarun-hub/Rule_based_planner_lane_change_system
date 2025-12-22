@@ -106,43 +106,25 @@ class Simulation:
             vehicle.move()
 
     def check_collision(self):
-        for vehicle1 in self.vehicles:
+        # 1. Reset all vehicles first (every frame)
+        for vehicle in self.vehicles:
+            vehicle.color = vehicle.original_color
+
+        # 2. Check pairwise collisions
+        for i, vehicle1 in enumerate(self.vehicles):
             rect1 = pygame.Rect(vehicle1.x, vehicle1.y, CAR_WIDTH, CAR_HEIGHT)
-            collision_detected = False  # Track if this vehicle is in a collision
-            for vehicle2 in self.vehicles:
-                if vehicle1 != vehicle2:  # Avoid self-collision
-                    rect2 = pygame.Rect(vehicle2.x, vehicle2.y, CAR_WIDTH, CAR_HEIGHT)
-                    if rect1.colliderect(rect2):
-                        # Collision detected: Change color and equalize speed
-                        vehicle1.color = RED
-                        vehicle2.color = RED
-                        slower_speed = min(vehicle1.speed, vehicle2.speed)
-                        vehicle1.speed = slower_speed
-                        vehicle2.speed = slower_speed
-                        collision_detected = True
-            if not collision_detected:
-                # No collisions for this vehicle: Reset color to original
-                vehicle1.color = vehicle1.original_color
-                vehicle2.color = vehicle2.original_color
-        # # 1. Reset all vehicles first (every frame)
-        # for vehicle in self.vehicles:
-        #     vehicle.color = vehicle.original_color
 
-        # # 2. Check pairwise collisions
-        # for i, vehicle1 in enumerate(self.vehicles):
-        #     rect1 = pygame.Rect(vehicle1.x, vehicle1.y, CAR_WIDTH, CAR_HEIGHT)
+            for vehicle2 in self.vehicles[i + 1 :]:  # avoid double-check
+                rect2 = pygame.Rect(vehicle2.x, vehicle2.y, CAR_WIDTH, CAR_HEIGHT)
 
-        #     for vehicle2 in self.vehicles[i + 1 :]:  # avoid double-check
-        #         rect2 = pygame.Rect(vehicle2.x, vehicle2.y, CAR_WIDTH, CAR_HEIGHT)
+                if rect1.colliderect(rect2):
+                    # Collision detected
+                    vehicle1.color = RED
+                    vehicle2.color = RED
 
-        #         if rect1.colliderect(rect2):
-        #             # Collision detected
-        #             vehicle1.color = RED
-        #             vehicle2.color = RED
-
-        #             slower_speed = min(vehicle1.speed, vehicle2.speed)
-        #             vehicle1.speed = slower_speed
-        #             vehicle2.speed = slower_speed
+                    slower_speed = min(vehicle1.speed, vehicle2.speed)
+                    vehicle1.speed = slower_speed
+                    vehicle2.speed = slower_speed
 
     def collect_data(self, ego):
         for _, vehicle in enumerate(self.vehicles[1:]):
