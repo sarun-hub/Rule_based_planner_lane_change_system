@@ -5,7 +5,7 @@
 WIDTH, HEIGHT = 1800, 600
 LANE_WIDTH = 70.0
 NUM_LANES = 2
-FPS = 30
+FPS = 60
 
 # Now this param is fixed to 2 for ACC test
 NUM_VEHICLES = 2    # number of vehicles including ego vehicles

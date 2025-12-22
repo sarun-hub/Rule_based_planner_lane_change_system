@@ -1,4 +1,4 @@
-import pygame, time
+import pygame
 import random
 from utils.pygame_config import *
 from utils.pygame_utils import (
@@ -86,20 +86,15 @@ class Simulation:
         # if not found, return None
         return sur1
 
-    def update_vehicle(self):
+    def update_vehicle(self, dt):
         for vehicle in self.vehicles:
-            current_time = time.time()
-            vehicle.current_time = current_time
             distance_traveled = vehicle.x - vehicle.previous_x
-            interval = current_time - vehicle.previous_time
-            if interval <= 1e-6:
-                interval = 1e-6
-            vehicle.time_interval = interval
-            vehicle.scaled_speed = distance_traveled / (vehicle.time_interval) + vehicle.ego_speed
+            vehicle.time_interval = dt
+            vehicle.scaled_speed = (
+                distance_traveled / (vehicle.time_interval) + vehicle.ego_speed
+            )
 
             vehicle.previous_x = vehicle.x
-            vehicle.previous_time = vehicle.current_time
-
             # TODO 21/12/2025 - doesn't consider lane change
 
             vehicle.accelerate()
@@ -140,7 +135,7 @@ class Simulation:
                 vehicle.scaled_speed / PIXEL_PER_METER,
             )
 
-    def update(self):
+    def update(self, dt):
         for vehicle in self.vehicles:
             if vehicle.ego == True:
                 ego = vehicle
@@ -152,7 +147,7 @@ class Simulation:
             ACC_controller(ego, sur1)
 
         # update vehicle position and speed
-        self.update_vehicle()
+        self.update_vehicle(dt)
 
         # check the vehicle collision
         self.check_collision()
@@ -267,14 +262,13 @@ class Simulation:
     def run(self):
         running = True
         paused = True  # for pausing
-        pause_start_time = time.time()  # Record pause start time
-        total_pause_duration = 0
         # Initialize =====
-        self.update()
+        # self.update(dt)
         self.draw()
         # ================
         reset = False
         while running:
+            dt = self.clock.tick(FPS) / 1000 # FPS tick in seconds
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -286,32 +280,14 @@ class Simulation:
                         running = False
                     if event.key in {pygame.K_p, pygame.K_SPACE, pygame.K_RETURN}:
                         paused = not paused
-                        if paused:
-                            pause_start_time = (
-                                time.time()
-                            )  # Record when the pause started
-                        else:
-                            # Accumulate total paused duration
-                            total_pause_duration += time.time() - pause_start_time
-                            if reset:
-                                for vehicle in self.vehicles:
-                                    vehicle.previous_time = (
-                                        time.time() - total_pause_duration
-                                    )  # Reset timing for each vehicle
-                                reset = False
-                            pause_start_time = 0
-                            # Adjust all vehicle's `previous_time` for accurate intervals
-                            for vehicle in self.vehicles:
-                                vehicle.previous_time += total_pause_duration
-                            total_pause_duration = 0  # Reset for next pause
                     if event.key == pygame.K_r:
                         reset = not reset
                         self.reset()
-                        self.update()
+                        self.update(dt)
                         self.draw()
 
             if not paused:  # Only update and draw when not paused
-                self.update()
+                self.update(dt)
                 self.draw()
                 self.save_df()
 
@@ -322,7 +298,6 @@ class Simulation:
                 self.screen.blit(text, (WIDTH // 2 - 50, HEIGHT // 2))
                 pygame.display.flip()
 
-            self.clock.tick(FPS)
         # print('Saving files!')
         # save_path = get_unique_filepath('SamplingBasedMPC_pygame','state_space_animation','.gif')
         # self.state_space.plot_stat_space(100,show = False, save_path=save_path)

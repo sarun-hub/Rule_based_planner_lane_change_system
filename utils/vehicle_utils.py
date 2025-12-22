@@ -1,4 +1,4 @@
-import time, pygame
+import pygame
 from utils.pygame_config import *
 import pandas as pd
 
@@ -44,13 +44,11 @@ class Vehicle:
         self.x = x
         self.y = y
         self.speed = speed  # Speed in pygame
-        self.scaled_speed = 0  # Actual speed
+        self.scaled_speed = speed  # Actual speed
         self.color = color
         self.original_color = color
         self.previous_x = x  # Location of previous frame
-        self.previous_time = time.time()  # Time of previous frame
-        self.current_time = None  # Time of current frame
-        self.time_interval = None  # Time interval between frame
+        self.time_interval = 0  # Time interval between frame
         self.target_y = y  # Target lane during lane change
         self.data_collections = DataCollection()
         self.ego = ego  # Check if it's ego vehicle
