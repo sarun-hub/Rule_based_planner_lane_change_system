@@ -88,13 +88,7 @@ class Simulation:
 
     def update_vehicle(self, dt):
         for vehicle in self.vehicles:
-            distance_traveled = vehicle.x - vehicle.previous_x
             vehicle.time_interval = dt
-            vehicle.scaled_speed = (
-                distance_traveled / (vehicle.time_interval) + vehicle.ego_speed
-            )
-
-            vehicle.previous_x = vehicle.x
             # TODO 21/12/2025 - doesn't consider lane change
 
             vehicle.accelerate()
@@ -125,14 +119,14 @@ class Simulation:
         for _, vehicle in enumerate(self.vehicles[1:]):
             distance_x = calculate_x_distance(ego, vehicle) / PIXEL_PER_METER
             distance_y = calculate_y_distance(ego, vehicle) / PIXEL_PER_METER
-            relative_speed = (vehicle.scaled_speed - ego.scaled_speed) / PIXEL_PER_METER
+            relative_speed = (vehicle.speed - ego.speed) / PIXEL_PER_METER
             vehicle.ego_speed = ego.speed
             vehicle.data_collections.update_value(
                 distance_x,
                 distance_y,
                 relative_speed,
-                ego.scaled_speed / PIXEL_PER_METER,
-                vehicle.scaled_speed / PIXEL_PER_METER,
+                ego.speed / PIXEL_PER_METER,
+                vehicle.speed / PIXEL_PER_METER,
             )
 
     def update(self, dt):
@@ -201,11 +195,11 @@ class Simulation:
         for i, vehicle in enumerate(self.vehicles):
             if i == 0:
                 speed_text.append(
-                    f"Ego car: {vehicle.scaled_speed:.2f} pixels/s -> {vehicle.scaled_speed/PIXEL_PER_METER:.2f} m/s"
+                    f"Ego car: {vehicle.speed:.2f} pixels/s -> {vehicle.speed/PIXEL_PER_METER:.2f} m/s"
                 )
             else:
                 speed_text.append(
-                    f"Car {i}: {vehicle.scaled_speed:.2f} pixels/s -> {vehicle.scaled_speed/PIXEL_PER_METER:.2f} m/s"
+                    f"Car {i}: {vehicle.speed:.2f} pixels/s -> {vehicle.speed/PIXEL_PER_METER:.2f} m/s"
                 )
 
         write_verbose(distance_x_text, 100, LANE_WIDTH * NUM_LANES + 50)
@@ -257,16 +251,15 @@ class Simulation:
     def reset(self):
         "Reset simulation to initial state."
         self.vehicles = self.initialize_vehicles(randomize=False)
+        self.sur1 = self.initialize_sur1()  # find sur1
         print("Restart Simulation!")
 
     def run(self):
         running = True
         paused = True  # for pausing
         # Initialize =====
-        # self.update(dt)
         self.draw()
         # ================
-        reset = False
         while running:
             dt = self.clock.tick(FPS) / 1000 # FPS tick in seconds
             for event in pygame.event.get():
@@ -281,7 +274,6 @@ class Simulation:
                     if event.key in {pygame.K_p, pygame.K_SPACE, pygame.K_RETURN}:
                         paused = not paused
                     if event.key == pygame.K_r:
-                        reset = not reset
                         self.reset()
                         self.update(dt)
                         self.draw()

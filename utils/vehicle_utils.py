@@ -43,11 +43,9 @@ class Vehicle:
     def __init__(self, x, y, speed, color, ego=False):
         self.x = x
         self.y = y
-        self.speed = speed  # Speed in pygame
-        self.scaled_speed = speed  # Actual speed
+        self.speed = speed  # Speed in pygame (pixel/s)
         self.color = color
         self.original_color = color
-        self.previous_x = x  # Location of previous frame
         self.time_interval = 0  # Time interval between frame
         self.target_y = y  # Target lane during lane change
         self.data_collections = DataCollection()
@@ -85,8 +83,8 @@ def load_acc_config(aggressive=0.8, h=1, delta_min=5):
 def ACC_controller(ego: Vehicle, front_car: Vehicle):
     aggressive, h, delta_min = load_acc_config()
     dist = (front_car.x - ego.x) - CAR_WIDTH
-    vp = front_car.scaled_speed 
-    vf = ego.scaled_speed 
+    vp = front_car.speed 
+    vf = ego.speed 
 
     if front_car is None:
         ego.acceleration = 0.0  # no acceleration when no front car
