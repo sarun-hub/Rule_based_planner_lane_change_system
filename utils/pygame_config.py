@@ -23,3 +23,9 @@ GREY = (128, 128, 128)
 
 # Vehicle properties
 CAR_WIDTH, CAR_HEIGHT = 91, 35
+
+
+# =========== CELL COVERAGE MODEL Config ==================
+distance_range = (5,50)     # Distance range in meters
+rel_speed_range = (-5,5)    # Relative speed range in m/s
+grid_resolution = (10,10)   # Grid resolution

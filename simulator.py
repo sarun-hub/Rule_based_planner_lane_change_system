@@ -8,6 +8,9 @@ from utils.pygame_utils import (
     calculate_y_pos_from_lane_num,
 )
 from utils.vehicle_utils import Vehicle, ACC_controller
+from utils.mpc_utils import SamplingBasedMPC, discretized_vehicle_model, cost_function
+from utils.coverage_utils import CoverageStatus, CellCoverageModel
+from utils.reference_genertor import TrajectoryGenerator
 
 # ======================== pygame simulator ==================
 
@@ -16,19 +19,23 @@ pygame.init()
 
 # Simulation Parameters
 MAX_SPEED = 5
-# Unused function (TODO(20/12/2025): later feature)
+# Unused function (TODO(20/12/2025): later feature ⭐)
 LANE_CHANGING_SPEED = 5
 LANE_CHANGE_BUFFER = 200  # Minimum gap for lane change
 
 
 class Simulation:
-    def __init__(self):
+    def __init__(self, mode="sampling_based_mpc"):
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.mode = mode
         pygame.display.set_caption("ACC Simulation")
         self.clock = pygame.time.Clock()
         self.vehicles = self.initialize_vehicles(randomize=False)
         self.sur1 = self.initialize_sur1()  # find sur1
         self.offset = 0
+        self.cell_coverage_model = CellCoverageModel(
+            distance_range, rel_speed_range, grid_resolution
+        )
 
     def initialize_vehicles(self, randomize=True):
         vehicles = []
@@ -61,7 +68,7 @@ class Simulation:
             speed_sur1 = 80  # 4 m/s
             vehicles.append(Vehicle(x_sur1, y_sur1, speed_sur1, BLUE, ego=False))
 
-            # Other Surs (TODO: 21/12/2025)
+            # Other Surs (TODO: 21/12/2025) ⭐
         return vehicles
 
     def initialize_sur1(self):
@@ -83,13 +90,21 @@ class Simulation:
             ):
                 sur1 = vehicle
                 break
+
+        sampling_mpc = SamplingBasedMPC(
+            discretized_vehicle_model, cost_function, 20, 20
+        )
+
+        # TODO 23/12/2025 - currently there is only one mpc ⭐⭐⭐
+        self.mpc = sampling_mpc if self.mode == "sampling_based_mpc" else sampling_mpc
+
         # if not found, return None
         return sur1
 
     def update_vehicle(self, dt):
         for vehicle in self.vehicles:
             vehicle.time_interval = dt
-            # TODO 21/12/2025 - doesn't consider lane change
+            # TODO 21/12/2025 - doesn't consider lane change ⭐
 
             vehicle.accelerate()
             vehicle.move()
@@ -129,6 +144,17 @@ class Simulation:
                 vehicle.speed / PIXEL_PER_METER,
             )
 
+    def sur1_controller(self, ego, sur1):
+        d = calculate_x_distance(ego, sur1) / PIXEL_PER_METER
+        vp = sur1.speed / PIXEL_PER_METER
+        vf = ego.speed / PIXEL_PER_METER
+        state_3d = (d, vp, vf)
+
+        current_cell_status = self.cell_coverage_model.get_current_coverage_status()
+        target = TrajectoryGenerator().propose(state_3d, current_cell_status)
+        sur1_acceleration = self.mpc.solve(state_3d, target)
+        sur1.acceleration = sur1_acceleration[0] / PIXEL_PER_METER
+
     def update(self, dt):
         for vehicle in self.vehicles:
             if vehicle.ego == True:
@@ -139,6 +165,7 @@ class Simulation:
         # get current info of ego, and front car to calcualte acceleration
         if sur1 is not None:
             ACC_controller(ego, sur1)
+            self.sur1_controller(ego, sur1)
 
         # update vehicle position and speed
         self.update_vehicle(dt)
@@ -149,6 +176,14 @@ class Simulation:
         # collect data in each car data
         self.collect_data(ego)
 
+        # TODO 23/12/2025: ⭐⭐⭐
+        # currently consider only the relation between car and sur 1
+        dist = ((sur1.x - ego.x) - CAR_WIDTH) / PIXEL_PER_METER
+        vp = sur1.speed / PIXEL_PER_METER
+        vf = ego.speed / PIXEL_PER_METER
+
+        # update cell coverage data (with current state)
+        self.cell_coverage_model.update((dist, vp, vf))
         ego.ego_speed = ego.speed
 
     def save_df(self):
@@ -261,7 +296,7 @@ class Simulation:
         self.draw()
         # ================
         while running:
-            dt = self.clock.tick(FPS) / 1000 # FPS tick in seconds
+            dt = self.clock.tick(FPS) / 1000  # FPS tick in seconds
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False

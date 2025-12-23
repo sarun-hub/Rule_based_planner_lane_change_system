@@ -82,14 +82,14 @@ def load_acc_config(aggressive=0.8, h=1, delta_min=5):
 
 def ACC_controller(ego: Vehicle, front_car: Vehicle):
     aggressive, h, delta_min = load_acc_config()
-    dist = (front_car.x - ego.x) - CAR_WIDTH
-    vp = front_car.speed 
-    vf = ego.speed 
+    dist = ((front_car.x - ego.x) - CAR_WIDTH) / PIXEL_PER_METER
+    vp = front_car.speed / PIXEL_PER_METER
+    vf = ego.speed / PIXEL_PER_METER
 
     if front_car is None:
         ego.acceleration = 0.0  # no acceleration when no front car
     else:
-        ego.acceleration = (
+        acc = (
             aggressive * dist + vp - (1 + aggressive * h) * vf - aggressive * delta_min
         ) / h
-        print(ego.acceleration)
+        ego.acceleration = acc * PIXEL_PER_METER
