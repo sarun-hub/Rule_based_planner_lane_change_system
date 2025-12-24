@@ -37,10 +37,12 @@ def get_discretize_matrix(A, B, C, D, dt=0.1):
     G_z = ct.c2d(G_s, dt, "zoh")
     return G_z.A, G_z.B, G_z.C, G_z.D
 
-def compute_next_state(current_state, control_input, A, B, offset=0):
+def compute_next_state(current_state, control_input, A, B, offset=0, return_tuple = True):
     next_state = A @ np.array(current_state).reshape(-1, 1) + B * control_input + offset
-    return tuple(next_state)
-
+    if return_tuple:
+        return tuple(next_state)
+    else :
+        return next_state
 
 def compute_affine_shift(A_d, offset_d):
     AP = np.eye(3) - np.array(A_d)

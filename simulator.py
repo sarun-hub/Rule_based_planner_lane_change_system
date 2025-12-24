@@ -8,7 +8,12 @@ from utils.pygame_utils import (
     calculate_y_pos_from_lane_num,
 )
 from utils.vehicle_utils import Vehicle, ACC_controller
-from utils.mpc_utils import SamplingBasedMPC, discretized_vehicle_model, cost_function
+from utils.mpc_utils import (
+    SamplingBasedMPC,
+    OptimizationBasedMPC,
+    discretized_vehicle_model,
+    cost_function,
+)
 from utils.coverage_utils import CoverageStatus, CellCoverageModel
 from utils.reference_genertor import TrajectoryGenerator
 
@@ -91,12 +96,22 @@ class Simulation:
                 sur1 = vehicle
                 break
 
-        sampling_mpc = SamplingBasedMPC(
-            discretized_vehicle_model, cost_function, 20, 20
-        )
-
-        # TODO 23/12/2025 - currently there is only one mpc ⭐⭐⭐
-        self.mpc = sampling_mpc if self.mode == "sampling_based_mpc" else sampling_mpc
+        # TODO: 24/12/2025 ⭐ - Currently N and num_samples are set hard-coded, change to proper argument
+        if self.mode == "sampling_based_mpc":
+            print("Using Sampling Based MPC")
+            self.mpc = SamplingBasedMPC(
+                discretized_vehicle_model, cost_function, N=20, num_samples=10
+            )
+        elif self.mode == "optimization_based_mpc":
+            print("Using Optimization Based MPC")
+            self.mpc = OptimizationBasedMPC(
+                discretized_vehicle_model, cost_function, N=20
+            )
+        else:
+            print("Unknown mode is selected. Use sampling based mpc")
+            self.mpc = SamplingBasedMPC(
+                discretized_vehicle_model, cost_function, N=20, num_samples=10
+            )
 
         # if not found, return None
         return sur1
@@ -148,11 +163,16 @@ class Simulation:
         d = calculate_x_distance(ego, sur1) / PIXEL_PER_METER
         vp = sur1.speed / PIXEL_PER_METER
         vf = ego.speed / PIXEL_PER_METER
+        current_ap = sur1.acceleration / PIXEL_PER_METER
         state_3d = (d, vp, vf)
 
         current_cell_status = self.cell_coverage_model.get_current_coverage_status()
         target = TrajectoryGenerator().propose(state_3d, current_cell_status)
-        sur1_acceleration = self.mpc.solve(state_3d, target)
+        sur1_acceleration = (
+            self.mpc.solve(state_3d, current_ap, target)
+            if self.mode == "optimization_based_mpc"
+            else self.mpc.solve(state_3d, target)
+        )
         sur1.acceleration = sur1_acceleration[0] / PIXEL_PER_METER
 
     def update(self, dt):
@@ -332,5 +352,6 @@ class Simulation:
 
 
 if __name__ == "__main__":
-    sim = Simulation()
+    # sim = Simulation(mode="optimization_based_mpc")
+    sim = Simulation(mode="sampling_based_mpc")
     sim.run()
