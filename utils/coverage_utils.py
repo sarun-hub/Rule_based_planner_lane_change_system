@@ -43,6 +43,15 @@ class CellCoverageModel:
         distance, rel_speed = convert_state3d_to_state2d(state_3d)
         i, j = self.state_to_grid(distance, rel_speed)
         return self.state_space[i, j] == 1
+    
+    def get_covered_cells(self):
+        covered_indices = np.where(self.state_space == 1)
+
+        if covered_indices[0].size == 0:
+            return []
+
+        return list(zip(*covered_indices))
+
 
     def update(self, state_3d: Tuple[float, float, float]):
         # Function that update the covered cells
@@ -68,6 +77,11 @@ class CellCoverageModel:
         )
 
         return cov
+    
+    def get_coverage(self):
+        covered_indices = np.where(self.state_space == 1)
+        return covered_indices[0].size / (self.grid_resolution[0] * self.grid_resolution[1])
+
 
     # ==================== Tools =======================================#
     def state_to_grid(self, distance: float, rel_speed: float):
