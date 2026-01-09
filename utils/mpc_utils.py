@@ -192,7 +192,8 @@ class OptimizationBasedMPC:
         self.cost_function = cost_function
         self.N = N
         self.distance_weight = 1
-        self.rel_speed_weight = 1
+        self.preceding_speed_weight = 1
+        self.following_speed_weight = 1
         self.input_weight = 1
 
         self.aggressive, self.h, self.delta_min = load_acc_config()
@@ -293,9 +294,8 @@ class OptimizationBasedMPC:
         Q = SX.zeros(self.n_states, self.n_states)  # Weight matrix of states diff
 
         Q[0, 0] = self.distance_weight
-        Q[0, 1] = 0
-        Q[1, 1] = self.rel_speed_weight
-        Q[1, 0] = 0
+        Q[1, 1] = self.preceding_speed_weight
+        Q[2, 2] = self.following_speed_weight
         R = SX.zeros(self.n_controls, self.n_controls)  # Weight matrix of control diff
         R[0, 0] = self.input_weight
 
@@ -310,7 +310,8 @@ class OptimizationBasedMPC:
             vp_diff = vp_st - target_vp
             vf_diff = vf_st - target_vf
 
-            diff_state = np.array([[d_diff], [vp_diff], [vf_diff]])  # 3x1
+            # Need to use Casadi syntax
+            diff_state = vertcat(d_diff, vp_diff, vf_diff) # 3x1
 
             obj += diff_state.T @ Q @ diff_state  # 1x1
 
@@ -354,8 +355,8 @@ class OptimizationBasedMPC:
         arg = {}
 
         # preceding acceleration
-        arg["lbx"] = -2  # -4
-        arg["ubx"] = 2  # 4
+        arg["lbx"] = [-2] * (self.n_controls * self.N)
+        arg["ubx"] = [2] * (self.n_controls * self.N)
 
         # Set upper and lower bounds for distance and speed separately
         g_lb = []
