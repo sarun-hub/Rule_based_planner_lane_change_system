@@ -187,90 +187,109 @@ class SamplingBasedMPC:
 
 class OptimizationBasedMPC:
     def __init__(self, model, cost_function, N: int):
-        # self.model = self._intialize_model(model)
-        self.model = model
-        self.cost_function = cost_function
-        self.N = N
-        self.distance_weight = 1
-        self.preceding_speed_weight = 1
-        self.following_speed_weight = 1
-        self.input_weight = 1
+        self.model = model  # Set up Vehicle Model
+        self.cost_function = cost_function  # for cost function (TODO: 09/01/2026 -> use it, now manually calcualte cost)
+        self.N = N  # Number of Steps (prediction horizon)
+
+        # Setup Weights
+        self.distance_weight = 1.0
+        self.preceding_speed_weight = 1.0
+        self.following_speed_weight = 1.0
+        self.input_weight = 1.0
 
         self.aggressive, self.h, self.delta_min = load_acc_config()
         # TODO: 23/12/2025 ⭐⭐⭐
         # currently set to be 0.1, but it should refer to current dt (from FPS)
         self.T = 0.1
 
-        # Initialize CasADi variables
-        self.d = SX.sym("d")
-        self.vp = SX.sym("vp")
-        self.vf = SX.sym("vf")
-        self.ap = SX.sym("ap")
+        # dimensions
+        self.n_states = 3
+        self.n_controls = 1
 
-        # State and control variables
-        self.states = vertcat(self.d, self.vp, self.vf)
-        self.n_states = self.states.numel()
-        self.controls = vertcat(self.ap)
-        self.n_controls = self.controls.numel()
-
-        # Prediction and parameter variables
-        self.U = SX.sym("U", self.n_controls, self.N)
-        self.P = SX.sym("P", self.n_states + self.n_states)
-        self.X = SX.sym("X", self.n_states, N + 1)
+        # CasADi symbols
+        self.x = SX.sym("x", self.n_states)  # state (d, vp, vf)
+        self.u = SX.sym("u", self.n_controls)  # control
+        self.U = SX.sym(
+            "U", self.n_controls, N
+        )  # control sequence (prediction horizon)
+        self.P = SX.sym("P", 2 * self.n_states)  # [x0, x_target]
 
         self._build_dynamics()
-
-    def _initialize_model(self, model):
-        """Convert matrix model into SX model"""
+        self._build_solver()
 
     def _build_dynamics(self):
-        """Define the vehicle dynamic"""
-        # discretized model
         next_state = self.model(
-            (self.d, self.vp, self.vf), self.ap, self.T, return_tuple=False
+            (self.x[0], self.x[1], self.x[2]), self.u, self.T, return_tuple=False
         )
-        rhs = vertcat(DM(next_state))
 
-        self.f = Function("f", [self.states, self.controls], [rhs])
+        # right hand size
+        rhs = vertcat(next_state)
 
-    def _build_solver(
-        self,
-        current_state: Tuple[float, float, float],
-        target: Tuple[float, float, float],
-    ):
-        """Build the optimization problem"""
-        self.X[:, 0] = self.P[: self.n_states]
+        self.f = Function("f", [self.x, self.u], [rhs])
 
-        # Populate predicted using dynamics
-        for k in range(self.N):
-            st = self.X[:, k]
-            cont = self.U[:, k]
-            f_value = self.f(st, cont)
-            # Since the f function give the next_state
-            self.X[:, k + 1] = f_value
+    def _build_solver(self):
+        Q = SX.zeros(self.n_states, self.n_states)  # Weight matrix of states diff
 
-        obj = self.set_objective_function(current_state, target)
+        Q[0, 0] = self.distance_weight
+        Q[1, 1] = self.preceding_speed_weight
+        Q[2, 2] = self.following_speed_weight
+    
+        R = SX.zeros(self.n_controls, self.n_controls)  # Weight matrix of control diff
+        R[0, 0] = self.input_weight
 
-        # Constraint
         g = []
-        for k in range(self.N + 1):
-            g = vertcat(g, self.X[0, k])
-            g = vertcat(g, self.X[1, k])
-            g = vertcat(g, self.X[2, k])
+        # set objective function
+        obj = 0
 
-            # a_f (following acceleration) limit
-            dynamic_constraint = (
-                self.aggressive * self.X[0, k]
-                + self.X[1, k]
-                - (1 + self.aggressive * self.h) * self.X[2, k]
+        # initial state
+        xk = self.P[: self.n_states]
+        # target state
+        x_target = self.P[self.n_states :]
+
+        # iterate through prediction horizon
+        for k in range(self.N):
+
+            # Cost from state
+            diff_state = xk - x_target
+            obj += diff_state.T @ Q @ diff_state
+
+            # Cost from control (for control input smoothness)
+            uk = self.U[:, k]
+            # calculate obj from uk
+            obj += uk.T @ R @ uk 
+            #  calculate obj from uk_diff       
+            # if k > 0:
+            #     diff_control = self.U[:, k] - self.U[:, k - 1]
+            #     obj += diff_control.T @ R @ diff_control
+
+            # get next state
+            xk = self.f(xk, uk)
+
+            # state constraints
+            g.append(xk[0])  # distance
+            g.append(xk[1])  # vp
+            g.append(xk[2])  # vf
+
+            # ACC dynamic constraint (for ACC acceleration)
+            dyn = (
+                self.aggressive * xk[0]
+                + xk[1]
+                - (1 + self.aggressive * self.h) * xk[2]
                 - self.aggressive * self.delta_min
-            ) / (self.h + 1e-6)
-            g = vertcat(g, dynamic_constraint)
+            ) # scaled h
 
-        opt_variables = reshape(self.U, (self.n_controls * self.N, 1))
+            g.append(dyn)
 
-        # Set up the problem
-        nlp_prob = {"f": obj, "x": opt_variables, "g": g, "p": self.P}
+        g = vertcat(*g)
+
+        opt_vars = reshape(self.U, self.n_controls * self.N, 1)
+
+        nlp_prob = {
+            "f": obj,  # objective function (cost)
+            "x": opt_vars,  # control input param
+            "g": g,  # constraint
+            "p": self.P,  # initial state and target state
+        }
 
         opts = {
             "ipopt.max_iter": 100,
@@ -281,49 +300,6 @@ class OptimizationBasedMPC:
         }
 
         self.solver = nlpsol("solver", "ipopt", nlp_prob, opts)
-
-    def set_objective_function(
-        self,
-        current_state: Tuple[float, float, float],
-        target: Tuple[float, float, float],
-    ):
-
-        # Objective function
-        obj = 0
-
-        Q = SX.zeros(self.n_states, self.n_states)  # Weight matrix of states diff
-
-        Q[0, 0] = self.distance_weight
-        Q[1, 1] = self.preceding_speed_weight
-        Q[2, 2] = self.following_speed_weight
-        R = SX.zeros(self.n_controls, self.n_controls)  # Weight matrix of control diff
-        R[0, 0] = self.input_weight
-
-        # Objective function for states diff
-        for k in range(self.N):
-
-            target_d, target_vp, target_vf = target
-            d_st = self.X[0, k]
-            vp_st = self.X[1, k]
-            vf_st = self.X[2, k]
-            d_diff = d_st - target_d
-            vp_diff = vp_st - target_vp
-            vf_diff = vf_st - target_vf
-
-            # Need to use Casadi syntax
-            diff_state = vertcat(d_diff, vp_diff, vf_diff) # 3x1
-
-            obj += diff_state.T @ Q @ diff_state  # 1x1
-
-        # Objective function for input diff
-        for k in range(self.N):
-            if k > 0:
-                cont = self.U[:, k]
-                previous_cont = self.U[:, k - 1]
-                diff_cont = cont - previous_cont
-                obj += diff_cont.T @ R @ diff_cont
-
-        return obj
 
     def predict_states(
         self, current_state: Tuple[float, float, float], input_sequence: List[float]
@@ -349,51 +325,27 @@ class OptimizationBasedMPC:
         current_u: float,
         target: Tuple[float, float, float],
     ) -> List[float]:
-        """Solve the MPC optimization problem."""
+        # bound for control
+        lbx = [-2.0] * self.N
+        ubx = [2.0] * self.N
 
-        self._build_solver(current_state, target)
-        arg = {}
+        # constraints for state (4 per steps - d, vp, vf, dyn)
+        lbg = []
+        ubg = []
+        for _ in range(self.N):
+            lbg += [5.0, 0.0, 0.0, -2.0 * self.h]        # scaled h
+            ubg += [120.0, inf, 43.8, 2.0 * self.h]
 
-        # preceding acceleration
-        arg["lbx"] = [-2] * (self.n_controls * self.N)
-        arg["ubx"] = [2] * (self.n_controls * self.N)
-
-        # Set upper and lower bounds for distance and speed separately
-        g_lb = []
-        g_ub = []
-
-        for _ in range(self.N + 1):
-            # Distance bounds
-            g_lb.append(5)  # Lower bound for distance
-            g_ub.append(120)  # 120 #60 # Upper bound for distance
-
-            # Speed bounds
-            g_lb.append(0)  # Lower bound for preceding speed
-            g_ub.append(float("inf"))  # 43.7  # Upper bound for preceding speed
-
-            g_lb.append(0)  # -inf # Lower bound for following speed
-            g_ub.append(43.8)  # 43.8   # Upper bound for following speed
-
-            g_lb.append(
-                -2
-            )  # -2 # Lower bound for dynamic constraint (following acceleration)
-            g_ub.append(
-                2
-            )  # 2 # Upper bound for dynamic constraint (following acceleration)
-
-        arg["lbg"] = g_lb
-        arg["ubg"] = g_ub
-
-        arg["p"] = vertcat(*current_state, *target)
-        arg["x0"] = DM(reshape(current_u, (self.n_controls, 1)))
+        p = vertcat(*current_state, *target)
 
         sol = self.solver(
-            x0=arg["x0"],
-            lbx=arg["lbx"],
-            ubx=arg["ubx"],
-            lbg=arg["lbg"],
-            ubg=arg["ubg"],
-            p=arg["p"],
+            x0=[0.0] * self.N,
+            lbx=lbx,
+            ubx=ubx,
+            lbg=lbg,
+            ubg=ubg,
+            p=p,
         )
-        u = reshape(sol["x"].T, self.n_controls, self.N)
-        return u.full().flatten().tolist()
+
+        u_opt = sol["x"].full().flatten()
+        return u_opt.tolist()
