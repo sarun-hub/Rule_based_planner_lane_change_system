@@ -173,7 +173,7 @@ class Simulation:
             if self.mode == "optimization_based_mpc"
             else self.mpc.solve(state_3d, target)
         )
-        sur1.acceleration = sur1_acceleration[0] / PIXEL_PER_METER
+        sur1.acceleration = sur1_acceleration[0] * PIXEL_PER_METER
 
     def update(self, dt):
         for vehicle in self.vehicles:
