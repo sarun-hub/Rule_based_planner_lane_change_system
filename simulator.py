@@ -15,7 +15,7 @@ from utils.mpc_utils import (
     cost_function,
 )
 from utils.coverage_utils import CoverageStatus, CellCoverageModel
-from utils.reference_genertor import TrajectoryGenerator
+from utils.reference_generator import TrajectoryGenerator
 
 # ======================== pygame simulator ==================
 

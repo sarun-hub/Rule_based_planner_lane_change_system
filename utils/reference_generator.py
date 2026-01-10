@@ -59,6 +59,7 @@ class TrajectoryGenerator:
             state_3d, cov_status, tolerance
         )
         if closest_uncovered_points != []:
+            print(f"Return target: {convert_state2d_to_state3d_pass_affine(closest_uncovered_points[0])}")
             return convert_state2d_to_state3d_pass_affine(closest_uncovered_points[0])
         else:
             print("There is no empty cells left")

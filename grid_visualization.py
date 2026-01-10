@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from utils.pygame_config import distance_range, rel_speed_range, grid_resolution
 from utils.coverage_utils import CellCoverageModel
-from utils.reference_genertor import TrajectoryGenerator
+from utils.reference_generator import TrajectoryGenerator
 from utils.utils import convert_state3d_to_state2d
 
 
