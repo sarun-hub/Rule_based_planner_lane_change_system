@@ -98,7 +98,7 @@ def get_A_and_offset():
 A_d, offset_d = get_A_and_offset()
 x_p = compute_affine_shift(A_d, offset_d)
 
-
+# convert actual state 2d to shifted state 3d 
 def convert_state2d_to_state3d_pass_affine(
     state_2d, C=np.array([[1, 0, 0], [0, 1, -1]], dtype=float)
 ):
@@ -107,25 +107,27 @@ def convert_state2d_to_state3d_pass_affine(
     CT = C @ T
     z_wanted = np.linalg.pinv(CT) @ (state_2d - y_p)
     x_wanted = T @ z_wanted
-    return tuple(x_wanted)
+    return x_wanted
 
-
+# convert linear (shifted) state 3d to actual (affine) state 3d 
 def convert_linear_to_affine_3d(state_3d):
     arr = np.asarray(state_3d).reshape(-1)
     if arr.size == 3:
         state_3d = arr.reshape(3, 1)
     else :
         raise ValueError(f"Expect 3 elements, now it's {arr.size}.")
-    return tuple(state_3d + x_p)
+    return state_3d + x_p
 
+# convert actual (affine) state 3d to linear (shifted) state 3d 
 def convert_affine_to_linear_3d(state_3d):
     arr = np.asarray(state_3d).reshape(-1)
     if arr.size == 3:
         state_3d = arr.reshape(3, 1)
     else :
         raise ValueError(f"Expect 3 elements, now it's {arr.size}.")
-    return tuple(state_3d - x_p)
+    return state_3d - x_p
 
+# convert actual (affine) state 2d to linear (shifted) state 2d 
 def convert_affine_to_linear_2d(state_2d):
     arr = np.asarray(state_2d).reshape(-1)
     if arr.size == 2:
@@ -135,14 +137,23 @@ def convert_affine_to_linear_2d(state_2d):
     C=np.array([[1, 0, 0], [0, 1, -1]])
     y_p = C @ x_p
 
-    return tuple(state_2d - y_p)
+    return state_2d - y_p
 
 
 if __name__ == "__main__":
+    print("x_p")
     print(compute_affine_shift(A_d, offset_d))
 
+    print("y_p")
+    print( np.array([[1, 0, 0], [0, 1, -1]]) @ compute_affine_shift(A_d, offset_d))
+
     y_initial = np.array([[10], [0]], dtype=float)
+    print("3d y shifted")
     print(convert_state2d_to_state3d_pass_affine(y_initial))
 
+    print("linear 2d")
+    print(convert_affine_to_linear_2d(y_initial))
+
     test_x3d = (1, 2, 3)
+    print("x3d")
     print(convert_linear_to_affine_3d(test_x3d))
