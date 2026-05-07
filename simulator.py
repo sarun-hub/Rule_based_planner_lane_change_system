@@ -14,6 +14,7 @@ from utils.mpc_utils import (
     discretized_vehicle_model,
     cost_function,
 )
+from utils.utils import convert_affine_to_linear_3d
 from utils.coverage_utils import CoverageStatus, CellCoverageModel
 from utils.reference_generator import TrajectoryGenerator
 
@@ -59,7 +60,7 @@ class Simulation:
                 vehicles.append(Vehicle(x, y, speed, color))
         else:
             # Ego car
-            x_ego = 500
+            x_ego = 300
             lane_ego = 0
             y_ego = calculate_y_pos_from_lane_num(lane_ego)
             speed_ego = 100  # 5 m/s
@@ -67,10 +68,10 @@ class Simulation:
             vehicles.append(ego)
 
             # =================== Sur 1 =================
-            x_sur1 = 900
+            x_sur1 = 591  # 900
             lane_sur1 = 0
             y_sur1 = calculate_y_pos_from_lane_num(lane_sur1)
-            speed_sur1 = 80  # 4 m/s
+            speed_sur1 = 100  # 5 m/s
             vehicles.append(Vehicle(x_sur1, y_sur1, speed_sur1, BLUE, ego=False))
 
             # Other Surs (TODO: 21/12/2025) ⭐
@@ -168,10 +169,11 @@ class Simulation:
 
         current_cell_status = self.cell_coverage_model.get_current_coverage_status()
         target = TrajectoryGenerator().propose(state_3d, current_cell_status)
+        print(convert_affine_to_linear_3d(state_3d))
         sur1_acceleration = (
-            self.mpc.solve(state_3d, current_ap, target)
+            self.mpc.solve(convert_affine_to_linear_3d(state_3d), current_ap, target)
             if self.mode == "optimization_based_mpc"
-            else self.mpc.solve(state_3d, target)
+            else self.mpc.solve(convert_affine_to_linear_3d(state_3d), target)
         )
         sur1.acceleration = sur1_acceleration[0] * PIXEL_PER_METER
 
@@ -352,6 +354,6 @@ class Simulation:
 
 
 if __name__ == "__main__":
-    # sim = Simulation(mode="optimization_based_mpc")
-    sim = Simulation(mode="sampling_based_mpc")
+    sim = Simulation(mode="optimization_based_mpc")
+    # sim = Simulation(mode="sampling_based_mpc")
     sim.run()

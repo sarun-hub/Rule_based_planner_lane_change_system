@@ -55,7 +55,7 @@ def discretized_vehicle_model(
 
     # predict the next state from control input
     next_state = compute_next_state(
-        state, control_input, A_d, B_d, offset_d, return_tuple
+        state, control_input, A_d, B_d, offset=0, return_tuple=return_tuple
     )
 
     return next_state
@@ -233,7 +233,7 @@ class OptimizationBasedMPC:
         Q[0, 0] = self.distance_weight
         Q[1, 1] = self.preceding_speed_weight
         Q[2, 2] = self.following_speed_weight
-    
+
         R = SX.zeros(self.n_controls, self.n_controls)  # Weight matrix of control diff
         R[0, 0] = self.input_weight
 
@@ -256,8 +256,8 @@ class OptimizationBasedMPC:
             # Cost from control (for control input smoothness)
             uk = self.U[:, k]
             # calculate obj from uk
-            obj += uk.T @ R @ uk 
-            #  calculate obj from uk_diff       
+            obj += uk.T @ R @ uk
+            #  calculate obj from uk_diff
             # if k > 0:
             #     diff_control = self.U[:, k] - self.U[:, k - 1]
             #     obj += diff_control.T @ R @ diff_control
@@ -276,7 +276,7 @@ class OptimizationBasedMPC:
                 + xk[1]
                 - (1 + self.aggressive * self.h) * xk[2]
                 - self.aggressive * self.delta_min
-            ) # scaled h
+            )  # scaled h
 
             g.append(dyn)
 
@@ -333,11 +333,10 @@ class OptimizationBasedMPC:
         lbg = []
         ubg = []
         for _ in range(self.N):
-            lbg += [5.0, 0.0, 0.0, -2.0 * self.h]        # scaled h
+            lbg += [5.0, 0.0, 0.0, -2.0 * self.h]  # scaled h
             ubg += [120.0, inf, 43.8, 2.0 * self.h]
 
         p = vertcat(*current_state, *target)
-
         sol = self.solver(
             x0=[0.0] * self.N,
             lbx=lbx,

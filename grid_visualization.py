@@ -7,12 +7,12 @@ from matplotlib.animation import FuncAnimation
 from utils.pygame_config import distance_range, rel_speed_range, grid_resolution
 from utils.coverage_utils import CellCoverageModel
 from utils.reference_generator import TrajectoryGenerator
-from utils.utils import convert_state3d_to_state2d
+from utils.utils import convert_state3d_to_state2d, convert_linear_to_affine_3d
 
 
 class GridVisualizer:
     def __init__(self, update_interval=100):
-        self.update_interval = update_interval
+        self.   update_interval = update_interval
         self.cell_coverage_model = CellCoverageModel(
             distance_range, rel_speed_range, grid_resolution
         )
@@ -48,6 +48,7 @@ class GridVisualizer:
         self.ax.set_ylim(*rel_speed_range)
         self.ax.set_xlabel("Distance (m)")
         self.ax.set_ylabel("Relative Velocity (m/s)")
+        plt.xticks(np.arange(5, 51, self.distance_grid_size))
 
         self.rectangles = {}
 
@@ -83,6 +84,7 @@ class GridVisualizer:
 
         current_cell_status = self.cell_coverage_model.get_current_coverage_status()
         current_target = self.traj_generator.propose(state_3d, current_cell_status)
+        current_target = convert_linear_to_affine_3d(current_target)
 
         i, j = self.cell_coverage_model.state_to_grid(*state_2d)
         rect = self.rectangles[(i, j)]
@@ -106,7 +108,7 @@ class GridVisualizer:
 
         coverage = self.cell_coverage_model.get_coverage() * 100
         self.ax.set_title(f"Car 1 Data → Coverage {coverage:.1f}%")
-
+        
         self.cell_coverage_model.update(state_3d)
 
     def run(self):

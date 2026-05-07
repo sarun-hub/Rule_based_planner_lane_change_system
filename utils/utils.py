@@ -37,12 +37,14 @@ def get_discretize_matrix(A, B, C, D, dt=0.1):
     G_z = ct.c2d(G_s, dt, "zoh")
     return G_z.A, G_z.B, G_z.C, G_z.D
 
-def compute_next_state(current_state, control_input, A, B, offset=0, return_tuple = True):
+
+def compute_next_state(current_state, control_input, A, B, offset=0, return_tuple=True):
     next_state = A @ np.array(current_state).reshape(-1, 1) + B * control_input + offset
     if return_tuple:
         return tuple(next_state)
-    else :
+    else:
         return next_state
+
 
 def compute_affine_shift(A_d, offset_d):
     AP = np.eye(3) - np.array(A_d)
@@ -57,7 +59,7 @@ def compute_affine_shift(A_d, offset_d):
 
 def convert_state3d_to_state2d(
     state_3d, C=np.array([[1, 0, 0], [0, 1, -1]], dtype=float)
-):  
+):
     state_2d = C @ state_3d
     return tuple(state_2d)
 
@@ -94,15 +96,53 @@ def get_A_and_offset():
 
 
 A_d, offset_d = get_A_and_offset()
+x_p = compute_affine_shift(A_d, offset_d)
 
 
 def convert_state2d_to_state3d_pass_affine(
     state_2d, C=np.array([[1, 0, 0], [0, 1, -1]], dtype=float)
 ):
-    x_p = compute_affine_shift(A_d, offset_d)
     y_p = C @ x_p
     T = np.array([[1, 0], [0, 1], [1, 0]], dtype=float)
     CT = C @ T
-    z_wanted = np.linalg.pinv(CT) @ (state_2d - y_p.T).T
+    z_wanted = np.linalg.pinv(CT) @ (state_2d - y_p)
     x_wanted = T @ z_wanted
-    return tuple(x_wanted + x_p)
+    return tuple(x_wanted)
+
+
+def convert_linear_to_affine_3d(state_3d):
+    arr = np.asarray(state_3d).reshape(-1)
+    if arr.size == 3:
+        state_3d = arr.reshape(3, 1)
+    else :
+        raise ValueError(f"Expect 3 elements, now it's {arr.size}.")
+    return tuple(state_3d + x_p)
+
+def convert_affine_to_linear_3d(state_3d):
+    arr = np.asarray(state_3d).reshape(-1)
+    if arr.size == 3:
+        state_3d = arr.reshape(3, 1)
+    else :
+        raise ValueError(f"Expect 3 elements, now it's {arr.size}.")
+    return tuple(state_3d - x_p)
+
+def convert_affine_to_linear_2d(state_2d):
+    arr = np.asarray(state_2d).reshape(-1)
+    if arr.size == 2:
+        state_2d = arr.reshape(2, 1)
+    else :
+        raise ValueError(f"Expect 2 elements, now it's {arr.size}.")
+    C=np.array([[1, 0, 0], [0, 1, -1]])
+    y_p = C @ x_p
+
+    return tuple(state_2d - y_p)
+
+
+if __name__ == "__main__":
+    print(compute_affine_shift(A_d, offset_d))
+
+    y_initial = np.array([[10], [0]], dtype=float)
+    print(convert_state2d_to_state3d_pass_affine(y_initial))
+
+    test_x3d = (1, 2, 3)
+    print(convert_linear_to_affine_3d(test_x3d))

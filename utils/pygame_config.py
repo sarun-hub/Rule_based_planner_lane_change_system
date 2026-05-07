@@ -2,7 +2,7 @@
 # that will not change so often.
 
 # Screen Dimensions
-WIDTH, HEIGHT = 1800, 600
+WIDTH, HEIGHT = 1200, 500
 LANE_WIDTH = 70.0
 NUM_LANES = 2
 FPS = 60
