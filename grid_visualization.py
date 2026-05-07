@@ -12,7 +12,7 @@ from utils.utils import convert_state3d_to_state2d, convert_linear_to_affine_3d
 
 class GridVisualizer:
     def __init__(self, update_interval=100):
-        self.   update_interval = update_interval
+        self.update_interval = update_interval
         self.cell_coverage_model = CellCoverageModel(
             distance_range, rel_speed_range, grid_resolution
         )
@@ -108,7 +108,7 @@ class GridVisualizer:
 
         coverage = self.cell_coverage_model.get_coverage() * 100
         self.ax.set_title(f"Car 1 Data → Coverage {coverage:.1f}%")
-        
+
         self.cell_coverage_model.update(state_3d)
 
     def run(self):
