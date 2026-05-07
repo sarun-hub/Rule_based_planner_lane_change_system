@@ -1,4 +1,5 @@
 import pygame
+import numpy as np
 import random
 from utils.pygame_config import *
 from utils.pygame_utils import (
@@ -11,10 +12,11 @@ from utils.vehicle_utils import Vehicle, ACC_controller
 from utils.mpc_utils import (
     SamplingBasedMPC,
     OptimizationBasedMPC,
+    OptimizationBasedMPC_reachable_constraint,
     discretized_vehicle_model,
     cost_function,
 )
-from utils.utils import convert_affine_to_linear_3d
+from utils.utils import convert_affine_to_linear_3d, get_basis, get_A_and_offset
 from utils.coverage_utils import CoverageStatus, CellCoverageModel
 from utils.reference_generator import TrajectoryGenerator
 
@@ -105,9 +107,31 @@ class Simulation:
             )
         elif self.mode == "optimization_based_mpc":
             print("Using Optimization Based MPC")
-            self.mpc = OptimizationBasedMPC(
-                discretized_vehicle_model, cost_function, N=20
+            # self.mpc = OptimizationBasedMPC(
+            #     discretized_vehicle_model, cost_function, N=20
+            # )
+            d = calculate_x_distance(ego, sur1) / PIXEL_PER_METER
+            vp = sur1.speed / PIXEL_PER_METER
+            vf = ego.speed / PIXEL_PER_METER
+            physical_initial_state = np.array((d, vp, vf)).reshape(-1, 1)
+            initial_state = convert_affine_to_linear_3d(physical_initial_state)
+            basis_1, basis_2 = get_basis()
+            num_input = 100
+            A_d, offset_d = get_A_and_offset()
+            self.mpc = OptimizationBasedMPC_reachable_constraint(
+                discretized_vehicle_model, A_d, offset_d, N=num_input
             )
+            self.A_dN = np.linalg.matrix_power(A_d, num_input)
+            alpha = 20
+            beta = 20
+            self.simple_target = (
+                self.A_dN @ initial_state + alpha * basis_1 + beta * basis_2
+            )
+            print("This is initial state:")
+            print(initial_state)
+            print("Target is initiated:")
+            print(self.simple_target)
+            self.achieve_target = False
         else:
             print("Unknown mode is selected. Use sampling based mpc")
             self.mpc = SamplingBasedMPC(
@@ -165,16 +189,25 @@ class Simulation:
         vp = sur1.speed / PIXEL_PER_METER
         vf = ego.speed / PIXEL_PER_METER
         current_ap = sur1.acceleration / PIXEL_PER_METER
-        state_3d = (d, vp, vf)
+        state_3d = np.array((d, vp, vf)).reshape(-1, 1)
 
         current_cell_status = self.cell_coverage_model.get_current_coverage_status()
-        target = TrajectoryGenerator().propose(state_3d, current_cell_status)
-        print(convert_affine_to_linear_3d(state_3d))
-        sur1_acceleration = (
-            self.mpc.solve(convert_affine_to_linear_3d(state_3d), current_ap, target)
-            if self.mode == "optimization_based_mpc"
-            else self.mpc.solve(convert_affine_to_linear_3d(state_3d), target)
-        )
+        # target = TrajectoryGenerator().propose(state_3d, current_cell_status)
+
+        # get target (shifted)
+        target = self.simple_target
+        current_state = convert_affine_to_linear_3d(state_3d)
+        if np.allclose(current_state, target, atol=1e-1):
+            self.achieve_target = True
+            return
+
+        # print(current_state)
+        # print log
+        current_af = ego.acceleration / PIXEL_PER_METER
+        print(f"{d:.4f}, {vp:.4f}, {vf:.4f}, {current_ap:.4f}, {current_af:.4f}")
+        # sampling based and optimization based mpc will required same input arguments
+        # the previous (current) ap will be collected in the MPC itself instead of input every step
+        sur1_acceleration = self.mpc.solve(current_state, target)
         sur1.acceleration = sur1_acceleration[0] * PIXEL_PER_METER
 
     def update(self, dt):
@@ -335,7 +368,7 @@ class Simulation:
                         self.update(dt)
                         self.draw()
 
-            if not paused:  # Only update and draw when not paused
+            if not paused and not self.achieve_target:  # Only update and draw when not paused
                 self.update(dt)
                 self.draw()
                 self.save_df()
@@ -344,6 +377,12 @@ class Simulation:
 
                 font = pygame.font.Font(None, 48)
                 text = font.render("Paused", True, RED)
+                self.screen.blit(text, (WIDTH // 2 - 50, HEIGHT // 2))
+                pygame.display.flip()
+
+            if self.achieve_target :
+                font = pygame.font.Font(None, 48)
+                text = font.render("Target Achieved!", True, BLUE)
                 self.screen.blit(text, (WIDTH // 2 - 50, HEIGHT // 2))
                 pygame.display.flip()
 

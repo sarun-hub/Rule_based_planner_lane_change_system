@@ -1,4 +1,4 @@
-import math, pygame, os
+import os
 import numpy as np
 import control as ct
 from utils.vehicle_utils import load_acc_config
@@ -94,6 +94,31 @@ def get_A_and_offset():
 
     return A_d, offset_d
 
+# TODO: 01/05/2026 ⭐ now hard-coded later need to make it related to A_d and B_d
+def get_basis(A_d=None, B_d=None):
+    if A_d == None or B_d == None:
+        basis_1 = np.array([[1], [0], [1]])
+        basis_2 = np.array([[0], [1], [0]])
+        return basis_1, basis_2
+
+    raise SystemExit("Input A_d and B_d required version is not available.")
+
+
+def compute_projection_matrix():
+    basis_1, basis_2 = get_basis()
+    reachability_set = np.hstack((basis_1, basis_2))
+    projection_trans_matrix = (
+        reachability_set
+        @ np.linalg.inv(reachability_set.T @ reachability_set)
+        @ reachability_set.T
+    )
+    return projection_trans_matrix
+
+def compute_orthogonal_projection_matrix():
+    projection_trans_matrix = compute_projection_matrix()
+    return np.eye(len(projection_trans_matrix)) - projection_trans_matrix
+
+# Conversion utils ============================
 
 A_d, offset_d = get_A_and_offset()
 x_p = compute_affine_shift(A_d, offset_d)

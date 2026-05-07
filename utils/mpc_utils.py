@@ -5,7 +5,7 @@ from utils.utils import (
     get_discretize_matrix,
     compute_next_state,
     compute_affine_shift,
-    convert_state3d_to_state2d,
+    compute_orthogonal_projection_matrix
 )
 from utils.vehicle_utils import load_acc_config
 
@@ -348,3 +348,199 @@ class OptimizationBasedMPC:
 
         u_opt = sol["x"].full().flatten()
         return u_opt.tolist()
+
+
+class OptimizationBasedMPC_reachable_constraint:
+    def __init__(self, model, A_d, offset_d, N: int):
+        self.model = model  # Set up Vehicle Model
+        self.A_d = A_d
+        self.N = N  # Number of Steps (prediction horizon)
+
+        # Setup Weights
+        self.distance_weight = 1.0
+        self.preceding_speed_weight = 1.0
+        self.following_speed_weight = 1.0
+        self.input_weight = 1.0
+
+        self.aggressive, self.h, self.delta_min = load_acc_config()
+        # TODO: 23/12/2025 ⭐⭐⭐
+        # currently set to be 0.1, but it should refer to current dt (from FPS)
+        self.T = 0.1
+
+        # Set up affine shift
+        self.x_p = compute_affine_shift(A_d, offset_d)
+
+        # dimensions
+        self.n_states = 3
+        self.n_controls = 1
+
+        # CasADi symbols
+        self.x = SX.sym("x", self.n_states)  # state (d, vp, vf)
+        self.u = SX.sym("u", self.n_controls)  # control
+        self.U = SX.sym(
+            "U", self.n_controls, N
+        )  # control sequence (prediction horizon)
+        self.P = SX.sym("P", 2 * self.n_states)  # [x0, x_target]
+
+        self._last_u = [0.0] * self.N  # initial guess
+
+        self._build_dynamics()
+        self._build_solver()
+
+    def _build_dynamics(self):
+        next_state = self.model(
+            (self.x[0], self.x[1], self.x[2]), self.u, self.T, return_tuple=False
+        )
+
+        # right hand size
+        rhs = vertcat(next_state)
+
+        self.f = Function("f", [self.x, self.u], [rhs])
+
+    def _build_solver(self):
+        Q = SX.zeros(self.n_states, self.n_states)  # Weight matrix of states diff
+
+        Q[0, 0] = self.distance_weight
+        Q[1, 1] = self.preceding_speed_weight
+        Q[2, 2] = self.following_speed_weight
+
+        R = SX.zeros(self.n_controls, self.n_controls)  # Weight matrix of control diff
+        R[0, 0] = self.input_weight
+
+        g = []
+        # set objective function
+        obj = 0
+
+        # initial state
+        x0 = self.P[: self.n_states]
+        # iterate state
+        xk = self.P[: self.n_states]
+        # target state
+        x_target = self.P[self.n_states :]
+
+        # Hard-coded perpendicular projection
+        project_perpendicular = compute_orthogonal_projection_matrix()
+
+        # since rank of project_perpendicular is 1, only 1 row is important.
+        # this part will find which row (1x3) is necessary.
+        row_norms = np.linalg.norm(project_perpendicular, axis=1)
+        independent_row_idx = np.argmax(row_norms)
+
+        # convert to symbolic variable
+        project_perpendicular_SX = SX(
+            project_perpendicular[independent_row_idx : independent_row_idx + 1, :]
+        )
+
+        A_pow = SX.eye(self.n_states)  # will store A^k, starts as I (A^0)
+
+        # iterate through prediction horizon
+        for k in range(self.N):
+            # Cost from state difference
+            diff_state = xk - x_target
+            obj += diff_state.T @ Q @ diff_state
+
+            # Cost from control (for control input smoothness)
+            uk = self.U[:, k]
+            # calculate obj from uk
+            obj += uk.T @ R @ uk
+
+            # get next state
+            xk = self.f(xk, uk)
+
+            # get constraint for reachable set for step >= 3 (index >= 2)
+            # update A_pow
+            A_pow = A_pow @ SX(self.A_d)  # A_pow = A^(k+1)
+            if k >= 2:
+                deviation = xk - A_pow @ x0
+                # residual will be 1x1 (from 1x3 @ 3x1)
+                residual = project_perpendicular_SX @ deviation
+                g.append(residual)
+
+            # state constraints
+            g.append(xk[0])  # distance
+            g.append(xk[1])  # vp
+            g.append(xk[2])  # vf
+
+        # add terminal state instead of hard constraint
+        terminal_state_diff = xk - x_target
+        Q_terminal = 100 * Q  # Set the terminal state more than weight of og state
+        obj += terminal_state_diff.T @ Q_terminal @ terminal_state_diff
+
+        g = vertcat(*g)
+
+        opt_vars = reshape(self.U, self.n_controls * self.N, 1)
+
+        print("Problem generated!")
+        nlp_prob = {
+            "f": obj,  # objective function (cost)
+            "x": opt_vars,  # control input param
+            "g": g,  # constraint
+            "p": self.P,  # initial state and target state
+        }
+
+        opts = {
+            "ipopt.max_iter": 100,
+            "ipopt.print_level": 0,
+            "print_time": 0,
+            "ipopt.acceptable_tol": 1e-8,
+            "ipopt.acceptable_obj_change_tol": 1e-6,
+        }
+
+        self.solver = nlpsol("solver", "ipopt", nlp_prob, opts)
+
+    def predict_states(
+        self, current_state: Tuple[float, float, float], input_sequence: List[float]
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Generate states (for N steps) from input sequences (acceleration)
+
+        :param
+            initial_state: initial state [current state] (distance, preceding speed, following speed)
+            input_sequence: list of input (acceleration)
+        :return: List of state (predicted states for N steps)
+        """
+        states = [current_state]
+        state = current_state
+        for u in input_sequence:
+            state = self.model(state, u, self.T)
+            states.append(state)
+        return states
+
+    def solve(
+        self,
+        current_state: Tuple[float, float, float],
+        target: Tuple[float, float, float],
+    ) -> List[float]:
+        # bound for control
+        lbx = [-inf] * self.N
+        ubx = [inf] * self.N
+
+        # constraints for state (4 per steps - d, vp, vf, dyn)
+        lbg = []
+        ubg = []
+        for k in range(self.N):
+            if k >= 2:
+                # reachable set equality: 3 rows, **but only 1 is independent**
+                lbg += [0.0]
+                ubg += [0.0]
+
+            lbg += [0.0 - self.x_p[0], 0.0 - self.x_p[1], 0.0 - self.x_p[2]]
+            ubg += [120 - self.x_p[0], inf - self.x_p[1], 43.8 - self.x_p[2]]
+
+        p = vertcat(*current_state, *target)
+        sol = self.solver(
+            x0=self._last_u,  # will update it every step
+            lbx=lbx,
+            ubx=ubx,
+            lbg=lbg,
+            ubg=ubg,
+            p=p,
+        )
+
+        u_opt = sol["x"].full().flatten().tolist()
+
+        # change the last control input
+        # Shift: drop first control, repeat last at the end
+        self._last_u = u_opt[1:] + [u_opt[-1]]
+
+        return u_opt
